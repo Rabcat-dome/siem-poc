@@ -2,8 +2,8 @@
 
 | | |
 |---|---|
-| สถานะ | **Draft v0.5**: ตัดสินใจ Q1–Q16 ครบแล้ว · ได้ข้อมูลเพิ่ม 2026-10-23 (NAS, NIC, ISP) และตัดสินใจจำลอง switch/AP กับ log ของ Unbound blocklist ไว้ก่อน ส่วนที่ยังต้องยืนยันอยู่ใน[หัวข้อ 9](#9-คำถามที่ต้องตัดสินใจร่วมกัน) |
-| วันที่ | 2026-10-23 |
+| สถานะ | **Draft v0.6**: ตัดสินใจ Q1–Q16 ครบแล้ว · **POC ใช้ข้อมูลจำลองเท่านั้น** การทดสอบกับอุปกรณ์และ log จริงย้ายไป Phase 1 ([หัวข้อ 3](#3-ขอบเขต)) · ส่วนที่ยังต้องยืนยันอยู่ใน[หัวข้อ 9](#9-คำถามที่ต้องตัดสินใจร่วมกัน) |
+| วันที่ | 2026-10-24 |
 | POC | `docker compose up -d` ใน repo นี้ (ดู [README](../README.md)) |
 | Diagram | [docs/architecture.html](architecture.html) |
 | Network architecture | [docs/NETWORK-ARCHITECTURE.md](NETWORK-ARCHITECTURE.md) |
@@ -65,11 +65,14 @@
 
 ISMS scope ครอบคลุม**ทั้งบริษัท สำนักงานเดียว** (Q1) จึงใช้ SIEM ชุดเดียวรับ log จากทุกระบบในสำนักงาน โดยติดตั้งบน**เครื่องแยก on-prem ใน Management VLAN** (Q7) ไม่ใช่บน Synology
 
+**ขอบเขตของ POC (ตัดสินใจ 2026-10-24):** POC ใช้**ข้อมูลจำลองเท่านั้น** simulator ส่ง log ของ OPNsense, switch, Wi-Fi AP และผลของ job บนเครื่อง SIEM เป้าหมายคือแสดงว่า log ทุกประเภทถูก parse, เติมบริบท who / what / where, ทำให้เกิด alert และแสดงใน dashboard ได้**ครบถ้วน** ซึ่งตรวจด้วย `tools/viz_check.py` (หัวข้อ 10) **การทดสอบกับอุปกรณ์หรือ log จริงอยู่นอก scope ของ POC** และย้ายไป Phase 1 ทั้งหมด ได้แก่ การเทียบรูปแบบ log จริงของ OPNsense, Unbound blocklist และ switch/AP กับ rule, การยิง traffic ผ่าน OPNsense ทดสอบ และการยืนยันรุ่นอุปกรณ์
+
 | | POC (repo นี้) | Phase 1: Pilot | Phase 2+ |
 |---|---|---|---|
-| แหล่ง log | OPNsense, switch และ Wi-Fi AP (จำลอง + เครื่องจริงได้) | OPNsense จริง | **Switch / Wi-Fi AP** จริง (Q9) |
+| ข้อมูล | **จำลองทั้งหมด** ตรวจความครบด้วย VIZ-CHECK | log จริง เทียบรูปแบบกับ rule | log จริง |
+| แหล่ง log | OPNsense, switch, Wi-Fi AP และ job ของเครื่อง SIEM (จำลอง) | OPNsense จริง | **Switch / Wi-Fi AP** จริง (Q9) |
 | ขนส่ง | Syslog UDP/TCP | **Syslog over TLS** | Graylog Sidecar / agent |
-| Identity | Static CSV | **DHCP static mapping (Q5)** + VPN user, sync mapping → CSV | (ถ้าต้องการ) Captive portal สำหรับ Guest |
+| Identity | Static CSV (IP, MAC และ VPN tunnel IP → เจ้าของ) | **DHCP static mapping (Q5)** + VPN user, sync mapping → CSV | (ถ้าต้องการ) Captive portal สำหรับ Guest |
 | Alert | 20 use cases | ปรับ threshold จากข้อมูลจริง | Correlation หลายแหล่ง |
 | แจ้งเตือน | Mailpit + webhook จำลอง | SMTP บริษัท + LINE OA/Teams | Ticketing / SOAR |
 | Process | - | Playbook, รอบ review | Monthly report, tabletop exercise |
@@ -233,6 +236,8 @@ RAM: ≤ 50 EPS ใช้ 8 GB รวม (OpenSearch heap 2 GB, Graylog heap 1�
 
 **ข้อมูลที่ยังต้องหาเพิ่ม** (อัปเดต 2026-10-23)
 
+> ตาม scope ของ POC (หัวข้อ 3) ข้อที่ยังไม่ติ๊กไม่ใช่เงื่อนไขผ่าน POC ข้อที่ต้องใช้อุปกรณ์หรือ log จริงทำใน Phase 1 ส่วนข้อกฎหมาย, risk acceptance และ antivirus เป็นงานของเจ้าของ ISMS
+
 - [ ] **Synology (Q10):** แจ้งว่าเป็น **DS724+** แต่ไม่พบรุ่นนี้ทั้งในหน้าสินค้าและใน[รายการรุ่นที่รองรับ WriteOnce และ immutable snapshot](https://kb.synology.com/en-global/DSM/tutorial/which_synology_nas_models_support_WriteOnce_and_secure_snapshots) ของ Synology (ตรวจเมื่อ 2026-10-23) รุ่น 2-bay ที่ชื่อใกล้เคียงคือ DS723+, DS224+ และ DS725+ ซึ่งอยู่ในรายการทั้งหมด ให้ดูชื่อรุ่นจริงที่ Control Panel › Info Center และเช็กว่า volume เป็น Btrfs (WriteOnce ต้องใช้ Btrfs)
 - [x] **Switch และ Wi-Fi AP (Q9):** ยังไม่ทราบรุ่น **ตัดสินใจ:** จำลองไว้ก่อน simulator ส่ง log ของ switch แบบ Cisco IOS (`%LINK-3-UPDOWN`, `%PORT_SECURITY`, `%SEC_LOGIN`, `%SYS-5-CONFIG_I`) และของ AP แบบ hostapd/dropbear ซึ่ง AP ที่เป็น Linux ส่วนใหญ่ใช้ พร้อม alert NET-03/04, IAM-05/06, CHG-02 เมื่อได้รุ่นจริงให้แก้เฉพาะ parse rule และ `wifi_ssids.csv`
 - [ ] **การ์ด network ของ OPNsense (Q8):** น่าจะเป็น Intel ยืนยันก่อนเปิด IPS ที่ Interfaces › Overview ถ้าชื่อ interface เป็น `igb`, `igc`, `em` หรือ `ix` คือ Intel ถ้าเป็น `re` คือ Realtek
@@ -263,6 +268,7 @@ RAM: ≤ 50 EPS ใช้ 8 GB รวม (OpenSearch heap 2 GB, Graylog heap 1�
   - **ผลกระทบ:**
     - `assets.csv` จะแม่นยำตราบที่ static mapping กับ CSV ตรงกัน จึงต้องมี process รับเครื่องใหม่ (เพิ่ม mapping + อัปเดต CSV) ผูกกับ change management
     - Phase 1 ควรมี script export static mapping จาก OPNsense API มาเป็น CSV อัตโนมัติ เพื่อไม่ต้องดูแลสองที่
+    - **VPN:** ตั้ง Client Specific Overrides ของ OpenVPN ให้ทุก user ได้ tunnel IP คงที่ แล้วใส่ IP นั้นใน `assets_static.csv` traffic ที่มาทาง VPN จึงบอกได้ว่าเป็นของใคร (POC ใช้ 10.8.0.6 / .10 / .14)
     - **ความเสี่ยงที่ยอมรับ:** (1) ระบุได้ระดับเจ้าของเครื่อง ไม่ใช่คนที่นั่งหน้าเครื่องจริง ถ้ามีเครื่องใช้ร่วมกันต้องจดไว้ในทะเบียน (2) ผู้ใช้ Guest Wi-Fi ระบุตัวได้แค่ MAC/hostname ควรบันทึกเป็น risk acceptance และทบทวนกับฝ่ายกฎหมายเรื่องหน้าที่ระบุตัวผู้ใช้บริการ
 - [x] **Q6 ปริมาณ log:** EPS จริงจาก OPNsense (ดูจาก Synology) เพื่อทำ sizing
   - **ตัดสินใจ:** บริษัทมีพนักงานน้อยกว่า 50 คน จึงประเมินไว้ที่ ≤ 50 EPS
@@ -340,18 +346,21 @@ RAM: ≤ 50 EPS ใช้ 8 GB รวม (OpenSearch heap 2 GB, Graylog heap 1�
 
 ## 10. เกณฑ์ผ่าน POC
 
-1. OPNsense จริงส่ง log เข้า Graylog ได้ และแสดงผลภายใน 10 วินาที
-2. filterlog ≥ 95% parse สำเร็จ (ไม่มี `gl2_processing_error`)
-3. สำหรับ incident ตัวอย่าง ทีมตอบได้ภายใน 1 นาทีว่า ใคร / เครื่องไหน / จาก zone ไหน / ไปที่ไหน / rule ไหน
-4. Alert ทั้ง 20 ข้อทำงาน และแจ้งเตือนถึง Email/Webhook ภายใน 2 นาที
-5. ทีมสาธิต walkthrough แบบที่จะทำให้ auditor ดูได้ (alert → สืบสวน → หลักฐาน)
+ทุกข้อวัดกับ**ข้อมูลจำลอง** (หัวข้อ 3)
+
+1. simulator ส่ง log ครบทุกประเภท (OPNsense, switch, Wi-Fi AP และ job ของเครื่อง SIEM) และแสดงใน Graylog ภายใน 10 วินาที
+2. pipeline test ผ่านทุกเคส (`tests/run_pipeline_tests.py`) และไม่มี `gl2_processing_error`
+3. **ความครบถ้วนของการ visualize:** `tools/viz_check.py` ไม่มี FAIL คือทุก widget ใน dashboard มีข้อมูล, ทุก `event_type` ที่ simulator ส่งมีอย่างน้อย 1 widget ที่แสดงรายละเอียด (ไม่ใช่แค่กราฟปริมาณตามเวลา) และ field who / what / where ของแต่ละ `event_type` มีค่า ≥ 95%
+4. Alert ทั้ง 20 ข้อเกิดได้จาก scenario ของ simulator (`--play all` ส่วน OPS-01 ทดสอบโดยหยุด simulator) และแจ้งเตือนถึง Email/Webhook ภายใน 2 นาที
+5. สำหรับ incident ตัวอย่าง ทีมตอบได้ภายใน 1 นาทีจาก dashboard ว่า ใคร / เครื่องไหน / จาก zone ไหน / ไปที่ไหน / rule ไหน
+6. ทีมสาธิต walkthrough แบบที่จะทำให้ auditor ดูได้ (alert → สืบสวน → หลักฐาน)
 
 ## 11. Roadmap
 
 | Phase | ระยะเวลา (ประมาณ) | งาน |
 |---|---|---|
-| 0 POC | 1–2 สัปดาห์ | repo นี้ + OPNsense ทดสอบบนเครื่อง x86 ยิง traffic จริงด้วย `traffic-generator` + ต่อ OPNsense จริงเพื่อปรับ regex ให้ตรง log จริง (รวมรูปแบบ log ของ Unbound blocklist) |
-| 1 Pilot | 2–4 สัปดาห์ | ซื้อและติดตั้งเครื่อง SIEM ใน Management VLAN (Q7), index set 90 วัน (Q2), Synology WriteOnce (Q10), SMTP บริษัท (Q4), DHCP static mapping + sync asset CSV ด้วย `tools/sync_assets.py` กับ OPNsense จริง (Q5), IDS mode (Q8), backup config OPNsense (Q12), DNS web filtering + บล็อก DoH/DoT (FR-16), SHA-256 manifest (NFR-11), NTP ตาม NFR-02, TLS, RBAC/MFA ตาม Q16 และ dashboard |
+| 0 POC | 1–2 สัปดาห์ | repo นี้ด้วย**ข้อมูลจำลองทั้งหมด**: simulator, pipeline test, alert 20 ข้อ, dashboard 5 ชุด และ VIZ-CHECK ผ่านตามหัวข้อ 10 (ไม่ทดสอบกับของจริง) |
+| 1 Pilot | 2–4 สัปดาห์ | **เริ่มทดสอบกับของจริง:** OPNsense ทดสอบบนเครื่อง x86 + `traffic-generator`, ต่อ OPNsense จริงแล้วเทียบรูปแบบ log (รวม Unbound blocklist) กับ rule, ยืนยันรุ่น NAS และการ์ด network · ซื้อและติดตั้งเครื่อง SIEM ใน Management VLAN (Q7), index set 90 วัน (Q2), Synology WriteOnce (Q10), SMTP บริษัท (Q4), DHCP static mapping + sync asset CSV ด้วย `tools/sync_assets.py` กับ OPNsense จริง (Q5), IDS mode (Q8), backup config OPNsense (Q12), DNS web filtering + บล็อก DoH/DoT (FR-16), SHA-256 manifest (NFR-11), NTP ตาม NFR-02, TLS, RBAC/MFA ตาม Q16 และ dashboard |
 | 2 Expand | 1–2 เดือน | Switch / Wi-Fi AP จริง (Q9): แก้ parse rule จำลองให้ตรงรุ่นจริง, TI feed ภายนอก |
 | 3 Operate | ต่อเนื่อง | review alert รายสัปดาห์, report รายเดือน, tabletop exercise, tune rule |
 

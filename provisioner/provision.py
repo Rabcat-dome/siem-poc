@@ -461,6 +461,7 @@ def dashboard_specs(s):
     fw, ids, auth, conf, vpn = (s[f"OPNsense - {n}"] for n in ("firewall", "ids", "auth", "config", "vpn"))
     ti, web, events = s["SIEM - Threat intel hits"], s["SIEM - Web filtering"], [EVENTS_STREAM]
     switch, wifi, dhcp = s["Network - switch"], s["Network - wifi"], s["OPNsense - dhcp"]
+    health = [s["SIEM - Log integrity"], s["SIEM - Capacity"]]
     guest_to_internal = "src_zone:Guest AND fw_action:block AND dst_zone:(Server OR LAN\\-Office OR Management)"
     return [
         ("SIEM - Overview (management)", "Log volume, alerts, web policy violations and privileged activity", [
@@ -476,6 +477,9 @@ def dashboard_specs(s):
             agg("Top blocked web categories", DNS_BLOCKED, ["web_category"], viz="pie", streams=[web]),
             agg("Admin logins and config changes by user", "event_type:(gui_login_success OR config_change)",
                 ["user"], ["event_type"], streams=[auth, conf]),
+            messages("SIEM health: log archive integrity (OPS-02) and disk usage (OPS-03)",
+                     "event_category:(integrity OR capacity)",
+                     ["source", "event_type", "result", "path", "disk_used_pct", "mismatch", "missing"], health),
         ]),
         ("SIEM - Firewall & network", "Passed vs blocked traffic, top blocked sources and ports, zone segregation", [
             agg("Blocked vs passed over time", "", ["timestamp"], ["fw_action"], "bar", [fw], w=12),
@@ -486,13 +490,19 @@ def dashboard_specs(s):
             agg("Guest -> internal zones, blocked (ISO A.8.22)", guest_to_internal,
                 ["src_ip", "dst_zone", "dst_ip", "dst_port"], streams=[fw], limit=15),
         ]),
-        ("SIEM - Identity & admin", "Firewall GUI logins, VPN authentication failures and configuration changes", [
+        ("SIEM - Identity & admin", "Who is behind an IP: DHCP leases, VPN sessions, firewall logins and changes", [
             agg("Firewall GUI logins over time", "event_type:(gui_login_success OR gui_login_failure)",
                 ["timestamp"], ["event_type"], "bar", [auth], w=12),
             agg("Failed GUI logins by source", "event_type:gui_login_failure", ["src_ip", "src_zone", "user"],
                 streams=[auth], limit=15),
-            agg("VPN authentication failures by user", "event_type:vpn_auth_failure", ["vpn_user"],
+            agg("VPN logins by user (columns: result)", "event_type:(vpn_auth_success OR vpn_auth_failure)",
+                ["vpn_user"], ["event_type"], streams=[vpn], limit=15),
+            messages("VPN sessions: user -> tunnel IP, from public IP", "event_type:vpn_session_start",
+                     ["vpn_user", "vpn_assigned_ip", "src_ip"], [vpn], w=6),
+            agg("VPN TLS errors by public IP", "event_type:vpn_tls_error", ["src_ip", "threat_category"],
                 streams=[vpn], limit=15),
+            agg("DHCP leases: IP -> MAC -> device / owner (ISO A.5.9)", "event_type:dhcp_lease",
+                ["src_ip", "src_mac", "dhcp_hostname", "src_owner"], streams=[dhcp], limit=25, w=12),
             messages("Recent firewall config changes", "event_type:config_change", ["user", "src_ip", "changed_via"],
                      [conf]),
         ]),
@@ -510,13 +520,16 @@ def dashboard_specs(s):
         ("SIEM - Switch & Wi-Fi", "Unknown devices, Wi-Fi clients per SSID, switch ports and network device admin", [
             agg("Wi-Fi connections over time by SSID", "event_type:wifi_connected", ["timestamp"], ["wifi_ssid"],
                 "bar", [wifi], w=12),
+            agg("Wi-Fi devices by SSID (columns: connect / disconnect)",
+                "event_type:(wifi_connected OR wifi_disconnected)", ["wifi_ssid", "src_mac", "src_owner"],
+                ["event_type"], streams=[wifi], limit=20, w=12),
             agg("Unknown devices on the office network (ISO A.5.9)",
                 "(mac_known:false AND src_zone:LAN\\-Office) OR event_type:port_security_violation",
                 ["src_mac", "event_type", "net_device"], streams=[dhcp, wifi, switch], limit=15),
             agg("Wrong Wi-Fi password by AP and device", "event_type:wifi_possible_psk_mismatch",
                 ["net_device", "src_mac"], streams=[wifi], limit=15),
-            agg("Switch link-down events by port", "event_type:port_down", ["net_device", "net_port"],
-                streams=[switch], limit=15),
+            agg("Switch port up / down by port", "event_type:(port_up OR port_down)", ["net_device", "net_port"],
+                ["event_type"], streams=[switch], limit=15),
             agg("Switch / AP admin logins (columns: result)",
                 "event_type:(device_login_success OR device_login_failure)", ["net_device", "src_ip", "user"],
                 ["event_type"], streams=[switch, wifi], limit=15),

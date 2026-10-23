@@ -5,6 +5,7 @@
 | ประเภทเอกสาร | เอกสารส่งมอบ (Architecture & Implementation Guide) |
 | สถานะ | Draft v0.2 · 2026-10-23 (ISP เป็น ADSL ไม่มี fixed IP, NIC น่าจะเป็น Intel, switch/AP ยังไม่ทราบรุ่น) |
 | เกี่ยวข้อง | [REQUIREMENTS.md](REQUIREMENTS.md) (Q1–Q16), [architecture.html](architecture.html) (SIEM integration), [README](../README.md) (POC และการต่อ log) |
+| ใช้เมื่อ | Phase 1 เป็นต้นไป (POC ใช้ข้อมูลจำลองเท่านั้น ดู REQUIREMENTS หัวข้อ 3) |
 
 OPNsense ต้องเป็น**ทางผ่านเดียว (single choke point)** ของ traffic ทุกอย่างระหว่างเครือข่ายสำนักงานกับ internet และระหว่าง zone ภายใน ถ้ามีทางอ้อม เช่น Wi-Fi ของ router ISP หรือเครื่องที่เสียบตรงกับ ONT traffic นั้นจะไม่ถูกกรองและไม่มี log ทำให้ตอบไม่ได้ว่าใครทำอะไร จากไหน ไปไหน ซึ่งเป็นโจทย์หลักของโปรเจกต์นี้
 

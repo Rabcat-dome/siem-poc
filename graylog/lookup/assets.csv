@@ -16,3 +16,6 @@
 "192.168.30.1","OPNSENSE-FW01","it-team","IT","critical",""
 "192.168.99.2","SW-CORE01","it-team","IT","high",""
 "192.168.99.3","AP-OFFICE01","it-team","IT","high",""
+"10.8.0.6","VPN-SOMCHAI","somchai.k","Finance","medium",""
+"10.8.0.10","VPN-SUDA","suda.p","HR","medium",""
+"10.8.0.14","VPN-NARIN","narin.t","IT","medium",""

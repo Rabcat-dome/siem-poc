@@ -34,6 +34,7 @@ SCENARIO_RATE = float(os.getenv("SCENARIO_RATE", "0.25"))
 FW_HOSTNAME = os.getenv("FW_HOSTNAME", "opnsense.poc.local")
 SWITCH_HOSTNAME = os.getenv("SWITCH_HOSTNAME", "sw-core01")
 AP_HOSTNAME = os.getenv("AP_HOSTNAME", "ap-office01")
+SIEM_HOSTNAME = os.getenv("SIEM_HOSTNAME", "siem01")  # results of the SIEM host's own jobs (disk, manifest)
 BKK = timezone(timedelta(hours=7))  # RFC3164 has no zone; the Graylog input reads it as Asia/Bangkok
 
 # --- Simulated company network (documentation IP ranges only) -------------
@@ -112,12 +113,12 @@ class Sender:
         else:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-    def send(self, app, msg, facility=LOCAL0, severity=SEV_INFO):
+    def send(self, app, msg, facility=LOCAL0, severity=SEV_INFO, host=FW_HOSTNAME):
         self.seq += 1
         ts = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
         pid = {"filterlog": 61531, "suricata": 30212, "audit": 4410, "openvpn_server1": 7731,
                "dhcpd": 2210, "unbound": 50443}.get(app, 1000)
-        line = (f"<{facility * 8 + severity}>1 {ts} {FW_HOSTNAME} {app} {pid} - "
+        line = (f"<{facility * 8 + severity}>1 {ts} {host} {app} {pid} - "
                 f'[meta sequenceId="{self.seq}"] {msg}')
         self._write(line.encode())
 
@@ -210,6 +211,24 @@ def dns_blocked(client, domain, qtype="A"):
     zone = domain.removeprefix("www.")
     out.send("unbound", f"[50443:0] info: {zone}. always_null {client}@{eport()} {domain}. {qtype} IN",
              DAEMON, SEV_INFO)
+
+
+# --- the SIEM host's scheduled jobs (same lines as tools/disk_check.py and tools/log_manifest.py) ---
+
+def disk_check(used_pct):
+    result = "WARN" if used_pct >= 75 else "PASS"
+    out.send("disk-check", f"action=disk_check path=/var/lib/docker used_pct={used_pct} "
+                           f"free_gb={500 * (100 - used_pct) / 100:.1f} total_gb=500.0 warn_pct=75 result={result}",
+             13, SEV_WARNING if result == "WARN" else SEV_INFO, host=SIEM_HOSTNAME)
+
+
+def manifest(action, failed=False):
+    if action == "create":
+        msg = f"action=create new_files={random.randint(20, 40)} manifest=manifest-{datetime.now(BKK):%Y%m%d-%H%M%S}.sha256"
+    else:
+        msg = (f"action=verify result={'FAIL' if failed else 'PASS'} ok={random.randint(600, 900)} "
+               f"mismatch={1 if failed else 0} missing=0 unlisted=0")
+    out.send("log-manifest", msg, 13, SEV_ERR if failed else SEV_INFO, host=SIEM_HOSTNAME)
 
 
 # --- switch (Cisco IOS-style) and Wi-Fi AP (hostapd / dropbear) ------------
@@ -411,6 +430,18 @@ def sc_netdev_config_change():
     ap_login("admin", ADMIN_WS, ok=True)
 
 
+def sc_integrity_fail():
+    # someone edited an archived log file on the Synology share: the monthly verify finds it (OPS-02)
+    manifest("verify", failed=True)
+
+
+def sc_disk_full():
+    disk_check(random.randint(76, 88))  # OPS-03
+
+
+# played with --play only (or --play all): they raise High/Medium SIEM-health alerts
+ON_DEMAND = [sc_integrity_fail, sc_disk_full]
+
 SCENARIOS = [sc_port_scan, sc_gui_bruteforce, sc_admin_login_unusual, sc_config_change, sc_c2_beacon,
              sc_phishing_dns, sc_vpn_bruteforce, sc_guest_lateral, sc_ids_web_attack, sc_vpn_login_ok,
              sc_blocked_category, sc_dns_bypass, sc_unknown_device, sc_port_flap, sc_netdev_bruteforce,
@@ -419,7 +450,7 @@ SCENARIOS = [sc_port_scan, sc_gui_bruteforce, sc_admin_login_unusual, sc_config_
 
 def play(names):
     """One-shot: play the named scenarios (or 'all') right now, then exit."""
-    by_name = {f.__name__.removeprefix("sc_"): f for f in SCENARIOS}
+    by_name = {f.__name__.removeprefix("sc_"): f for f in SCENARIOS + ON_DEMAND}
     picked = list(by_name) if names == ["all"] else names
     for name in picked:
         if name not in by_name:
@@ -443,6 +474,11 @@ def main():
         n = random.randint(6, 12)
         for _ in range(n):
             baseline_event()
+        if tick % 720 == 1:  # hourly at 5 s per tick: the SIEM host's disk check
+            disk_check(random.randint(35, 55))
+        if tick % 17280 == 1:  # nightly: SHA-256 manifest of new archive files, then a passing verify
+            manifest("create")
+            manifest("verify")
         played = ""
         if random.random() < SCENARIO_RATE:
             scenario = random.choice(SCENARIOS)

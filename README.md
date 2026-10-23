@@ -31,6 +31,8 @@ flowchart LR
   classDef poc stroke-dasharray: 4 3
 ```
 
+> **ขอบเขต POC: ข้อมูลจำลองเท่านั้น** POC นี้แสดงว่า log ทุกประเภทถูก parse, เติมบริบท, ทำให้เกิด alert และแสดงใน dashboard ได้ครบ (ตรวจด้วย [VIZ-CHECK](#ตรวจความครบถ้วนของ-dashboard-viz-check)) การทดสอบกับอุปกรณ์หรือ log จริงอยู่นอก scope และทำใน Phase 1 หัวข้อที่ระบุว่า "Phase 1" ด้านล่างจึงเป็นคู่มือสำหรับตอนนั้น (REQUIREMENTS หัวข้อ 3)
+>
 > OPNsense เป็น FreeBSD จึงรันใน Docker ไม่ได้ POC นี้ใช้ **simulator** ส่ง log รูปแบบเดียวกับ OPNsense จริง (RFC5424: filterlog, suricata, audit, openvpn, dhcpd, unbound) ทำให้ pipeline เดียวกันใช้กับเครื่องจริงได้ทันที
 >
 > สามอย่างที่ยังไม่รู้รูปแบบจริงจึง**จำลองไว้ก่อน**: switch (แบบ Cisco IOS เช่น `%LINK-3-UPDOWN`), Wi-Fi AP (hostapd + dropbear) ซึ่งส่งแบบ RFC3164 เหมือนอุปกรณ์เครือข่ายทั่วไป และบรรทัดที่ Unbound ตอบจาก blocklist (`log-local-actions`) ต้องเทียบกับเครื่องจริงก่อนขึ้นระบบ (REQUIREMENTS หัวข้อ 9)
@@ -81,7 +83,9 @@ event_category:(switch OR wifi)
 docker compose run --rm --no-deps generator python /app/opnsense_simulator.py --play all
 ```
 
-หรือเลือกเฉพาะบางตัว เช่น `--play port_scan c2_beacon` (มี `port_scan`, `gui_bruteforce`, `admin_login_unusual`, `config_change`, `c2_beacon`, `phishing_dns`, `vpn_bruteforce`, `guest_lateral`, `ids_web_attack`, `vpn_login_ok`, `blocked_category`, `dns_bypass`, `unknown_device`, `port_flap`, `netdev_bruteforce`, `netdev_login_unusual`, `netdev_config_change`)
+หรือเลือกเฉพาะบางตัว เช่น `--play port_scan c2_beacon` (มี `port_scan`, `gui_bruteforce`, `admin_login_unusual`, `config_change`, `c2_beacon`, `phishing_dns`, `vpn_bruteforce`, `guest_lateral`, `ids_web_attack`, `vpn_login_ok`, `blocked_category`, `dns_bypass`, `unknown_device`, `port_flap`, `netdev_bruteforce`, `netdev_login_unusual`, `netdev_config_change` และ 2 ตัวที่ไม่สุ่มเล่นเองเพราะเป็น alert ด้านสุขภาพของ SIEM: `integrity_fail` (OPS-02), `disk_full` (OPS-03))
+
+simulator ส่งผลของ job บนเครื่อง SIEM ด้วย: disk check ทุกชั่วโมงและ SHA-256 manifest ทุกคืน (ผลปกติ) เพื่อให้ widget สุขภาพของ SIEM มีข้อมูล
 
 **ทดสอบ alert "log หาย" (OPS-01):**
 
@@ -93,7 +97,7 @@ docker compose stop generator
 
 **ปรับความถี่:** `INTERVAL_SECONDS=2 SCENARIO_RATE=0.5 docker compose up -d generator`
 
-## ต่อกับ OPNsense จริง
+## ต่อกับ OPNsense จริง (Phase 1, นอก scope POC)
 
 1. OPNsense › System › Settings › Logging › Remote › Add
    - Transport: UDP(4) หรือ TCP(4) · Hostname: IP ของเครื่องที่รัน POC · Port: `1514`
@@ -107,7 +111,7 @@ docker compose stop generator
    - `web_categories.csv`: ใช้ domain ชุดเดียวกับ blocklist ที่เปิดใน Unbound (policy `block`) และหมวดที่แค่ monitor (policy `monitor`) ใส่ระดับ domain หลัก แล้ว subdomain จะ match ให้เอง
 6. เทียบ log จริงกับ regex ใน `graylog/pipeline/*.rule` ถ้ารูปแบบต่างจากที่ simulator ส่ง (เช่นใช้ dnsmasq แทน ISC dhcpd) ให้แก้ rule แล้วรัน provisioner ใหม่
 
-## ต่อ switch และ Wi-Fi AP
+## ต่อ switch และ Wi-Fi AP (Phase 1–2, นอก scope POC)
 
 ยังไม่ทราบรุ่น (Q9) simulator จึงส่ง log จาก `sw-core01` และ `ap-office01` แทน ตอนได้อุปกรณ์จริง:
 
@@ -118,7 +122,7 @@ docker compose stop generator
 
 NET-03 รู้ว่าเครื่องไหนเป็นของบริษัทจาก `assets_mac.csv` ซึ่ง `tools/sync_assets.py` สร้างจาก MAC ใน DHCP static mapping พร้อมกับ `assets.csv`
 
-## ยิง traffic จริงผ่าน OPNsense ทดสอบ
+## ยิง traffic จริงผ่าน OPNsense ทดสอบ (Phase 1, นอก scope POC)
 
 แทนที่จะให้ simulator ส่ง log ปลอมเข้า Graylog ตรง ๆ ให้ [traffic-generator](traffic-generator/traffic_generator.py) สร้าง traffic จริงผ่าน **OPNsense ทดสอบ** (ไม่ใช่ตัว production) แล้วให้ OPNsense เขียน log เอง ตัว generator ทำเฉพาะสิ่งที่ผู้ใช้ทั่วไปหรือเครื่องที่ตั้งค่าผิดทำ ได้แก่ เปิดเว็บ, DNS query (รวมถึงโดเมนทดสอบในหมวดที่ถูกบล็อก) และการพยายามใช้ DoT/DoH ส่วน scenario เชิงโจมตี (brute force, scan, C2) ยังใช้ simulator แบบ log เหมือนเดิม
 
@@ -152,13 +156,31 @@ provisioner สร้าง 5 dashboard ให้อัตโนมัติ (Gr
 
 | Dashboard | แสดงอะไร |
 |---|---|
-| SIEM - Overview (management) | จำนวน alert, admin login, login ล้มเหลว และ config change · ปริมาณ log ตามหมวด · alert ตามระดับ · หมวดเว็บที่ถูกบล็อก |
+| SIEM - Overview (management) | จำนวน alert, admin login, login ล้มเหลว และ config change · ปริมาณ log ตามหมวด · alert ตามระดับ · หมวดเว็บที่ถูกบล็อก · สุขภาพของ SIEM (ตรวจ archive, disk) |
 | SIEM - Firewall & network | block เทียบ pass ตามเวลา · source และ port ที่ถูกบล็อกมากที่สุด · ตาราง zone ต้นทาง × ปลายทาง · Guest พยายามเข้าโซนภายใน (A.8.22) |
-| SIEM - Identity & admin | login หน้า GUI สำเร็จ/ล้มเหลว · login ล้มเหลวแยกตาม IP/user · VPN login ล้มเหลว · ตาราง config change ล่าสุด |
+| SIEM - Identity & admin | login หน้า GUI สำเร็จ/ล้มเหลว · login ล้มเหลวแยกตาม IP/user · VPN login สำเร็จ/ล้มเหลวต่อ user · VPN session (user → tunnel IP) · VPN TLS error ตาม IP · DHCP lease (IP → MAC → เครื่อง → เจ้าของ) · ตาราง config change ล่าสุด |
 | SIEM - Web filtering & threat | หมวดที่บล็อกและหมวดที่ monitor · เครื่องที่เข้าหมวดต้องห้าม · การเลี่ยง DNS filtering · IDS signature · threat intel hits |
-| SIEM - Switch & Wi-Fi | การต่อ Wi-Fi ตาม SSID · เครื่องที่ไม่อยู่ในทะเบียน asset · ใส่รหัส Wi-Fi ผิด · port ที่ link down · admin login และ config change ของ switch/AP |
+| SIEM - Switch & Wi-Fi | การต่อ Wi-Fi ตาม SSID · เครื่องในแต่ละ SSID (ต่อ/หลุด) · เครื่องที่ไม่อยู่ในทะเบียน asset · ใส่รหัส Wi-Fi ผิด · port up/down · admin login และ config change ของ switch/AP |
 
 ถ้าแก้นิยาม dashboard ใน `provision.py` แล้วรัน provisioner ใหม่ dashboard จะถูกแทนที่ทั้งชุด (รวมถึงการแก้ใน UI) ถ้าไม่ได้แก้นิยาม จะไม่แตะของเดิม
+
+## ตรวจความครบถ้วนของ dashboard (VIZ-CHECK)
+
+เกณฑ์ผ่าน POC ข้อ 3 (REQUIREMENTS หัวข้อ 10) [tools/viz_check.py](tools/viz_check.py) อ่าน dashboard จาก Graylog เอง (การแก้ใน UI จึงนับด้วย) แล้วตรวจข้อมูลในช่วงที่กำหนด
+
+| ส่วน | ตรวจอะไร | ผล |
+|---|---|---|
+| 1. Widgets | ทุก widget มีข้อมูล และ field ที่ widget แสดงมีค่ากี่ % | FAIL ถ้าว่าง |
+| 2. Event types | ทุก `event_type` ในข้อมูลมี widget ที่แสดงรายละเอียด (ตาราง, pie, รายการข้อความ) อย่างน้อย 1 อัน กราฟปริมาณตามเวลาไม่นับ | FAIL ถ้าไม่มี |
+| 3. Alerts | alert ทุกข้อเกิดอย่างน้อย 1 ครั้ง (บอกวิธียิงข้อที่ต้องยิงเอง) | WARN |
+| 4. Fields | field who / what / where ที่แต่ละ `event_type` ต้องมี (`EXPECTED` ในไฟล์) และ `src_owner` ของต้นทางในโซนภายใน | WARN ถ้าต่ำกว่า `--min-fill` (95%) |
+
+```bash
+python3 tools/viz_check.py                    # 24 ชั่วโมงล่าสุด (exit 1 ถ้ามี FAIL)
+python3 tools/viz_check.py --hours 1 --out reports   # เขียน reports/VIZ-CHECK_<วันเวลา>.md ด้วย
+```
+
+เมื่อเพิ่มประเภท log ใหม่ ให้เพิ่ม field ที่ต้องมีใน `EXPECTED` และเพิ่ม widget ใน `provision.py` จน VIZ-CHECK ไม่มี FAIL
 
 ## เครื่องมือ Phase 1
 
@@ -324,6 +346,7 @@ traffic-generator/            # traffic จริงผ่าน OPNsense ทด
 tools/log_manifest.py         # SHA-256 manifest ของ log archive (NFR-11)
 tools/monthly_report.py       # รายงานรายเดือน RPT-01
 tools/disk_check.py           # disk usage ของเครื่อง SIEM -> OPS-03 (แทนการวัด EPS)
+tools/viz_check.py            # VIZ-CHECK: ทุก widget มีข้อมูล, ทุก event_type มี widget, field ครบ (เกณฑ์ POC)
 tools/sync_assets.py          # DHCP static mapping ของ OPNsense -> assets.csv + assets_mac.csv
 tools/sync_web_categories.py  # แหล่ง blocklist -> web_categories.csv
 tests/                        # ชุดทดสอบ pipeline rule ผ่าน Graylog simulator
@@ -373,7 +396,8 @@ High ส่งทั้ง Email และ Webhook ส่วน Medium/Low ส�
 
 - รหัสผ่าน `admin/admin` และ `GRAYLOG_PASSWORD_SECRET` เป็นค่าตั้งต้น ถ้าจะใช้จริงให้ตั้งใน `.env` (ดู `.env.example`) และเก็บรหัส root ไว้เป็น break-glass เหมือน `log-admin`
 - OpenSearch ปิด security plugin (ไม่ได้เปิด port ออกนอก docker network) และ UI ของ POC เป็น HTTP (production เป็น HTTPS ดูหัวข้อ "Deploy production")
-- Identity (IP → ผู้ใช้) มาจาก CSV ซึ่ง sync จาก DHCP static mapping ได้ แต่ยังไม่ได้ทดสอบกับ OPNsense จริง
+- **ใช้ข้อมูลจำลองเท่านั้นตาม scope** ข้อต่อไปนี้จึงยังไม่ได้ทดสอบกับของจริงและอยู่ใน Phase 1
+- Identity (IP → ผู้ใช้) มาจาก CSV ซึ่ง sync จาก DHCP static mapping ได้ แต่ยังไม่ได้ทดสอบกับ OPNsense จริง ส่วน VPN ใช้ tunnel IP ที่ตรึงไว้ต่อ user (Client Specific Overrides) ใน `assets_static.csv`
 - filterlog IPv6 และ DHCP แบบ dnsmasq ทดสอบผ่าน simulator API เท่านั้น ยังไม่เคยเจอ traffic จริง
 - log ของ switch, Wi-Fi AP และ query ที่ Unbound ตอบจาก blocklist เป็นรูปแบบที่สมมติไว้ (ยังไม่ทราบรุ่นอุปกรณ์และยังไม่เห็น log จริง) ต้องเทียบกับของจริงก่อนใช้ NET-03/04, IAM-05/06, CHG-02 และ WEB-01
 

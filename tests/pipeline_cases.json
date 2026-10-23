@@ -89,6 +89,17 @@
    }
   },
   {
+   "name": "filterlog v4 from a VPN tunnel IP: owner from the pinned tunnel address",
+   "message": "90,,,96f5c0b74e022e0b375c24619797b391,ovpns1,match,pass,in,4,0x0,,64,1234,0,DF,6,tcp,60,10.8.0.6,192.168.20.12,50000,443,0,S,1,,64240,,mss",
+   "expect": {
+    "src_zone": "VPN",
+    "src_host": "VPN-SOMCHAI",
+    "src_owner": "somchai.k",
+    "dst_host": "SRV-ERP01",
+    "fw_rule_desc": "*"
+   }
+  },
+  {
    "name": "filterlog non-matching ip_version is ignored",
    "message": "1,,,abc,igb1,match,pass,in,9,x",
    "expect": {},
