@@ -1,0 +1,473 @@
+{
+ "_help": "Add a case: copy one, set message+application_name (or a full RFC5424 'raw' line), list expected fields in 'expect' (\"*\" = must exist) and fields that must not be set in 'absent'. Run: python3 tests/run_pipeline_tests.py",
+ "cases": [
+  {
+   "name": "filterlog v4 tcp pass: parse + ports + zone + asset + rule desc",
+   "message": "70,,,5708f9e9520b4894ab4d6f4d5680be5b,igb1,match,pass,in,4,0x0,,64,1234,0,DF,6,tcp,60,192.168.10.21,142.250.198.4,50000,443,0,S,1,,64240,,mss",
+   "expect": {
+    "event_source": "opnsense",
+    "event_category": "firewall",
+    "event_type": "fw_pass",
+    "fw_rule_nr": "70",
+    "fw_rule_id": "5708f9e9520b4894ab4d6f4d5680be5b",
+    "fw_interface": "igb1",
+    "fw_action": "pass",
+    "fw_direction": "in",
+    "ip_version": 4,
+    "protocol": "tcp",
+    "packet_length": 60,
+    "src_ip": "192.168.10.21",
+    "dst_ip": "142.250.198.4",
+    "src_port": 50000,
+    "dst_port": 443,
+    "src_zone": "LAN-Office",
+    "dst_zone": "Internet",
+    "src_host": "LT-SOMCHAI",
+    "src_owner": "somchai.k",
+    "src_department": "Finance",
+    "fw_rule_desc": "Allow LAN to Internet (HTTP/HTTPS)"
+   },
+   "absent": [
+    "fw_rule_tag",
+    "threat_indicator",
+    "dst_host"
+   ]
+  },
+  {
+   "name": "filterlog v4 udp block: ports",
+   "message": "70,,,02f4bab031b57d1e30553ce08e0ec131,igb0,match,block,in,4,0x0,,64,1234,0,none,17,udp,60,192.168.10.22,192.168.10.1,53124,53,32",
+   "expect": {
+    "event_type": "fw_block",
+    "protocol": "udp",
+    "src_port": 53124,
+    "dst_port": 53,
+    "dst_host": "OPNSENSE-FW01"
+   }
+  },
+  {
+   "name": "filterlog v4 icmp: no ports",
+   "message": "70,,,5708f9e9520b4894ab4d6f4d5680be5b,igb1,match,pass,in,4,0x0,,64,1234,0,none,1,icmp,60,192.168.10.21,1.1.1.1,request,1,1",
+   "expect": {
+    "protocol": "icmp",
+    "ip_version": 4,
+    "src_ip": "192.168.10.21",
+    "dst_ip": "1.1.1.1"
+   },
+   "absent": [
+    "src_port",
+    "dst_port"
+   ]
+  },
+  {
+   "name": "filterlog v4 dns-bypass rule: fw_rule_tag",
+   "message": "81,,,ac87eb2b3711486a4c03407afdd88ca1,igb1,match,block,in,4,0x0,,64,1234,0,DF,6,tcp,60,192.168.10.21,1.1.1.1,40000,853,0,S,1,,64240,,mss",
+   "expect": {
+    "fw_rule_tag": "dns-bypass",
+    "dst_port": 853,
+    "fw_action": "block"
+   }
+  },
+  {
+   "name": "filterlog v4 threat intel: dst IP is IOC",
+   "message": "70,,,5708f9e9520b4894ab4d6f4d5680be5b,igb1,match,pass,in,4,0x0,,64,1234,0,DF,6,tcp,60,192.168.10.22,198.51.100.66,50001,443,0,S,1,,64240,,mss",
+   "expect": {
+    "threat_indicator": true,
+    "threat_ioc": "198.51.100.66",
+    "threat_category": "c2-server",
+    "src_host": "LT-SUDA"
+   }
+  },
+  {
+   "name": "filterlog v4 threat intel: src IP is IOC",
+   "message": "5,,,02f4bab031b57d1e30553ce08e0ec131,igb0,match,block,in,4,0x0,,64,1234,0,DF,6,tcp,60,192.0.2.200,203.0.113.10,44444,22,0,S,1,,64240,,mss",
+   "expect": {
+    "threat_indicator": true,
+    "threat_ioc": "192.0.2.200",
+    "threat_category": "known-scanner",
+    "src_zone": "Internet",
+    "dst_port": 22
+   }
+  },
+  {
+   "name": "filterlog non-matching ip_version is ignored",
+   "message": "1,,,abc,igb1,match,pass,in,9,x",
+   "expect": {},
+   "absent": [
+    "event_category",
+    "event_type"
+   ]
+  },
+  {
+   "name": "filterlog v6 tcp pass: parse + ports",
+   "message": "70,,,5708f9e9520b4894ab4d6f4d5680be5b,igb1,match,pass,in,6,0x00,0x5a3c1,64,tcp,6,40,2001:db8:10::21,2001:db8:ffff::443,51000,443,0,S,1,,64240,,mss",
+   "expect": {
+    "event_source": "opnsense",
+    "event_category": "firewall",
+    "event_type": "fw_pass",
+    "fw_rule_nr": "70",
+    "fw_rule_id": "5708f9e9520b4894ab4d6f4d5680be5b",
+    "fw_interface": "igb1",
+    "fw_action": "pass",
+    "fw_direction": "in",
+    "ip_version": 6,
+    "protocol": "tcp",
+    "packet_length": 40,
+    "src_ip": "2001:db8:10::21",
+    "dst_ip": "2001:db8:ffff::443",
+    "src_port": 51000,
+    "dst_port": 443,
+    "fw_rule_desc": "Allow LAN to Internet (HTTP/HTTPS)"
+   }
+  },
+  {
+   "name": "filterlog v6 udp block: ports",
+   "message": "5,,,02f4bab031b57d1e30553ce08e0ec131,igb1,match,block,in,6,0x00,0x5a3c1,64,udp,17,40,fe80::1,ff02::fb,5353,5353,32",
+   "expect": {
+    "ip_version": 6,
+    "event_type": "fw_block",
+    "protocol": "udp",
+    "src_port": 5353,
+    "dst_port": 5353,
+    "src_ip": "fe80::1",
+    "dst_ip": "ff02::fb"
+   }
+  },
+  {
+   "name": "filterlog v6 icmpv6: no ports",
+   "message": "70,,,5708f9e9520b4894ab4d6f4d5680be5b,igb1,match,pass,in,6,0x00,0x5a3c1,64,ipv6-icmp,58,40,fe80::1,ff02::1,16,",
+   "expect": {
+    "ip_version": 6,
+    "protocol": "ipv6-icmp",
+    "src_ip": "fe80::1",
+    "dst_ip": "ff02::1"
+   },
+   "absent": [
+    "src_port",
+    "dst_port"
+   ]
+  },
+  {
+   "name": "filterlog v6 dns-bypass tag",
+   "message": "81,,,ac87eb2b3711486a4c03407afdd88ca1,igb1,match,block,in,6,0x00,0x5a3c1,64,tcp,6,40,2001:db8:10::21,2606:4700:4700::1111,40000,853,0,S,1,,64240,,mss",
+   "expect": {
+    "fw_rule_tag": "dns-bypass",
+    "ip_version": 6,
+    "dst_port": 853
+   }
+  },
+  {
+   "name": "suricata alert",
+   "application_name": "suricata",
+   "message": "[1:2027865:3] ET MALWARE Possible Cobalt Strike Beacon Observed [Classification: A Network Trojan was detected] [Priority: 1] {TCP} 192.168.10.22:49500 -> 198.51.100.66:443",
+   "expect": {
+    "event_category": "ids",
+    "event_type": "ids_alert",
+    "ids_sid": 2027865,
+    "ids_signature": "ET MALWARE Possible Cobalt Strike Beacon Observed",
+    "ids_classification": "A Network Trojan was detected",
+    "ids_priority": 1,
+    "protocol": "tcp",
+    "src_ip": "192.168.10.22",
+    "src_port": 49500,
+    "dst_ip": "198.51.100.66",
+    "dst_port": 443,
+    "threat_indicator": true,
+    "src_host": "LT-SUDA"
+   }
+  },
+  {
+   "name": "GUI login failure",
+   "application_name": "audit",
+   "message": "/index.php: Web GUI authentication error for user 'root' from: 192.168.30.55",
+   "expect": {
+    "event_category": "auth",
+    "event_type": "gui_login_failure",
+    "event_outcome": "failure",
+    "user": "root",
+    "src_ip": "192.168.30.55",
+    "src_zone": "Guest"
+   }
+  },
+  {
+   "name": "GUI login success",
+   "application_name": "audit",
+   "message": "/index.php: Successful login for user 'root' from: 192.168.99.10",
+   "expect": {
+    "event_category": "auth",
+    "event_type": "gui_login_success",
+    "event_outcome": "success",
+    "user": "root",
+    "src_ip": "192.168.99.10",
+    "src_host": "ADMIN-WS01",
+    "src_zone": "Management"
+   }
+  },
+  {
+   "name": "configuration change",
+   "application_name": "audit",
+   "message": "user root@192.168.99.10 changed configuration to /conf/backup/config-1792765800.1234.xml in /firewall_rules_edit.php",
+   "expect": {
+    "event_category": "config",
+    "event_type": "config_change",
+    "user": "root",
+    "src_ip": "192.168.99.10",
+    "config_backup": "/conf/backup/config-1792765800.1234.xml",
+    "changed_via": "/firewall_rules_edit.php"
+   }
+  },
+  {
+   "name": "openvpn auth success",
+   "application_name": "openvpn_server1",
+   "message": "user 'somchai.k' authenticated using 'Local Database'",
+   "expect": {
+    "event_category": "vpn",
+    "event_type": "vpn_auth_success",
+    "event_outcome": "success",
+    "vpn_user": "somchai.k",
+    "user": "somchai.k"
+   }
+  },
+  {
+   "name": "openvpn auth failure",
+   "application_name": "openvpn_server1",
+   "message": "user 'admin' could not authenticate.",
+   "expect": {
+    "event_category": "vpn",
+    "event_type": "vpn_auth_failure",
+    "event_outcome": "failure",
+    "vpn_user": "admin",
+    "user": "admin"
+   }
+  },
+  {
+   "name": "openvpn session (user -> tunnel IP)",
+   "application_name": "openvpn_server1",
+   "message": "somchai.k/49.1.2.3:41234 MULTI_sva: pool returned IPv4=10.8.0.6, IPv6=(Not enabled)",
+   "expect": {
+    "event_category": "vpn",
+    "event_type": "vpn_session_start",
+    "vpn_user": "somchai.k",
+    "src_ip": "49.1.2.3",
+    "vpn_assigned_ip": "10.8.0.6",
+    "src_zone": "Internet"
+   }
+  },
+  {
+   "name": "openvpn TLS auth error",
+   "application_name": "openvpn_server1",
+   "message": "203.0.113.77:41234 TLS Auth Error: Auth Username/Password verification failed for peer",
+   "expect": {
+    "event_category": "vpn",
+    "event_type": "vpn_tls_error",
+    "event_outcome": "failure",
+    "src_ip": "203.0.113.77",
+    "threat_indicator": true,
+    "threat_category": "bruteforce-source"
+   }
+  },
+  {
+   "name": "dhcp ISC dhcpd lease",
+   "application_name": "dhcpd",
+   "message": "DHCPACK on 192.168.10.21 to 3c:22:fb:10:00:21 (LT-SOMCHAI) via igb1",
+   "expect": {
+    "event_category": "dhcp",
+    "event_type": "dhcp_lease",
+    "src_ip": "192.168.10.21",
+    "src_mac": "3c:22:fb:10:00:21",
+    "dhcp_hostname": "LT-SOMCHAI",
+    "fw_interface": "igb1"
+   }
+  },
+  {
+   "name": "dhcp dnsmasq lease with hostname",
+   "application_name": "dnsmasq-dhcp",
+   "message": "DHCPACK(igb1) 192.168.10.21 3c:22:fb:10:00:21 LT-SOMCHAI",
+   "expect": {
+    "event_source": "opnsense",
+    "event_category": "dhcp",
+    "event_type": "dhcp_lease",
+    "src_ip": "192.168.10.21",
+    "src_mac": "3c:22:fb:10:00:21",
+    "dhcp_hostname": "LT-SOMCHAI",
+    "fw_interface": "igb1",
+    "src_zone": "LAN-Office"
+   }
+  },
+  {
+   "name": "dhcp dnsmasq lease without hostname (VLAN iface)",
+   "application_name": "dnsmasq-dhcp",
+   "message": "DHCPACK(vlan0.30) 192.168.30.55 00:0c:29:30:00:55",
+   "expect": {
+    "event_category": "dhcp",
+    "event_type": "dhcp_lease",
+    "src_ip": "192.168.30.55",
+    "src_mac": "00:0c:29:30:00:55",
+    "fw_interface": "vlan0.30",
+    "src_zone": "Guest"
+   },
+   "absent": [
+    "dhcp_hostname"
+   ]
+  },
+  {
+   "name": "dhcp dnsmasq DHCPOFFER is not a lease",
+   "application_name": "dnsmasq-dhcp",
+   "message": "DHCPOFFER(igb1) 192.168.10.21 3c:22:fb:10:00:21",
+   "expect": {},
+   "absent": [
+    "event_type",
+    "event_category"
+   ]
+  },
+  {
+   "name": "unbound dns query, uncategorised",
+   "application_name": "unbound",
+   "message": "[50443:0] info: 192.168.10.21 www.google.com. A IN",
+   "expect": {
+    "event_category": "dns",
+    "event_type": "dns_query",
+    "src_ip": "192.168.10.21",
+    "dns_query": "www.google.com",
+    "dns_qtype": "A",
+    "dns_parent": "google.com",
+    "src_host": "LT-SOMCHAI"
+   },
+   "absent": [
+    "web_category",
+    "web_policy",
+    "threat_indicator"
+   ]
+  },
+  {
+   "name": "unbound dns: web category via parent domain (monitor)",
+   "application_name": "unbound",
+   "message": "[50443:0] info: 192.168.10.21 www.facebook.com. AAAA IN",
+   "expect": {
+    "web_category": "social",
+    "web_policy": "monitor"
+   },
+   "absent": [
+    "threat_indicator"
+   ]
+  },
+  {
+   "name": "unbound dns: web category exact match (monitor)",
+   "application_name": "unbound",
+   "message": "[50443:0] info: 192.168.10.21 drive.google.com. A IN",
+   "expect": {
+    "web_category": "cloud-storage",
+    "web_policy": "monitor"
+   }
+  },
+  {
+   "name": "unbound dns: blocked category via parent domain",
+   "application_name": "unbound",
+   "message": "[50443:0] info: 192.168.10.23 www.slot-888.example. A IN",
+   "expect": {
+    "web_category": "gambling",
+    "web_policy": "block",
+    "dns_query": "www.slot-888.example"
+   }
+  },
+  {
+   "name": "unbound dns: threat intel domain + web category",
+   "application_name": "unbound",
+   "message": "[50443:0] info: 192.168.10.22 cdn-update.malicious-c2.example. A IN",
+   "expect": {
+    "threat_indicator": true,
+    "threat_ioc": "cdn-update.malicious-c2.example",
+    "threat_category": "c2-domain",
+    "web_category": "malware",
+    "web_policy": "block"
+   }
+  },
+  {
+   "name": "unbound dns: phishing domain (threat intel)",
+   "application_name": "unbound",
+   "message": "[50443:0] info: 192.168.10.24 login-microsoft-verify.example. A IN",
+   "expect": {
+    "threat_indicator": true,
+    "threat_category": "phishing",
+    "web_category": "phishing"
+   }
+  },
+  {
+   "name": "log-manifest verify result",
+   "application_name": "log-manifest",
+   "message": "action=verify result=PASS ok=3 mismatch=0 missing=0 unlisted=0",
+   "expect": {
+    "event_source": "siem-tools",
+    "event_category": "integrity",
+    "event_type": "log_manifest_verify",
+    "result": "PASS",
+    "ok": "3",
+    "mismatch": "0"
+   }
+  },
+  {
+   "name": "local_hour: 14:30Z = 21:30 Asia/Bangkok -> 21 (after hours)",
+   "application_name": "audit",
+   "timestamp": "2026-10-23T14:30:00.000Z",
+   "message": "/index.php: Successful login for user 'root' from: 192.168.99.10",
+   "expect": {
+    "local_hour": 21
+   }
+  },
+  {
+   "name": "local_hour: 02:05Z = 09:05 Bangkok -> 9 (office hours)",
+   "application_name": "audit",
+   "timestamp": "2026-10-23T02:05:00.000Z",
+   "message": "/index.php: Successful login for user 'root' from: 192.168.99.10",
+   "expect": {
+    "local_hour": 9
+   }
+  },
+  {
+   "name": "local_hour: 17:30Z wraps past midnight -> 0",
+   "application_name": "audit",
+   "timestamp": "2026-10-23T17:30:00.000Z",
+   "message": "/index.php: Successful login for user 'root' from: 192.168.99.10",
+   "expect": {
+    "local_hour": 0
+   }
+  },
+  {
+   "name": "local_hour: non-UTC timestamp offset",
+   "application_name": "audit",
+   "timestamp": "2026-10-23T21:30:00.000+07:00",
+   "message": "/index.php: Successful login for user 'root' from: 192.168.99.10",
+   "expect": {
+    "local_hour": 21
+   }
+  },
+  {
+   "name": "local_hour: absent when message is not parsed (no event_source)",
+   "application_name": "other",
+   "message": "something unrelated",
+   "expect": {},
+   "absent": [
+    "local_hour",
+    "event_source"
+   ]
+  },
+  {
+   "name": "raw RFC5424 line: dnsmasq via full syslog (template for real samples)",
+   "raw": "<30>1 2026-10-23T08:03:08.898Z opnsense.poc.local dnsmasq-dhcp 2210 - [meta sequenceId=\"1\"] DHCPACK(igb1) 192.168.10.25 3c:22:fb:10:00:25 LT-NARIN",
+   "expect": {
+    "event_type": "dhcp_lease",
+    "src_ip": "192.168.10.25",
+    "dhcp_hostname": "LT-NARIN",
+    "source": "opnsense.poc.local"
+   }
+  },
+  {
+   "name": "raw RFC5424 line: filterlog v6",
+   "raw": "<134>1 2026-10-23T08:03:08.898Z opnsense.poc.local filterlog 61531 - [meta sequenceId=\"2\"] 70,,,5708f9e9520b4894ab4d6f4d5680be5b,igb1,match,pass,in,6,0x00,0x5a3c1,64,tcp,6,40,2001:db8:10::21,2001:db8:ffff::443,51000,443,0,S,1,,64240,,mss",
+   "expect": {
+    "ip_version": 6,
+    "src_port": 51000,
+    "dst_port": 443
+   }
+  }
+ ]
+}

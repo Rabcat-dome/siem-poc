@@ -1,0 +1,11 @@
+rule "opnsense: filterlog ports IPv6 (tcp/udp)"
+when
+  to_string($message.event_category) == "firewall" &&
+  to_long($message.ip_version) == 6 &&
+  (to_string($message.protocol) == "tcp" || to_string($message.protocol) == "udp")
+then
+  // IPv6 layout: ports follow dst at CSV index 17/18
+  let f = split(",", to_string($message.message));
+  set_field("src_port", to_long(f[17]));
+  set_field("dst_port", to_long(f[18]));
+end

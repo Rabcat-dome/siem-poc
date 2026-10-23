@@ -2,5 +2,8 @@ rule "enrich: local hour (for after-hours detection)"
 when
   has_field("event_source")
 then
-  set_field("local_hour", to_long(format_date(to_date($message.timestamp), "H", "Asia/Bangkok")));
+  // Parse the ISO-8601 text of the timestamp rather than to_date(): live messages carry a DateTime
+  // (its string form is ISO-8601 UTC), while the pipeline simulator used by tests/ passes a plain string.
+  let ts = parse_date(value: to_string($message.timestamp), pattern: "yyyy-MM-dd'T'HH:mm:ss.SSSZZ", timezone: "UTC");
+  set_field("local_hour", to_long(format_date(ts, "H", "Asia/Bangkok")));
 end

@@ -13,6 +13,7 @@ then
   set_field("fw_interface", f[4]);
   set_field("fw_action", f[6]);
   set_field("fw_direction", f[7]);
+  set_field("ip_version", 4);
   set_field("protocol", f[16]);
   set_field("packet_length", to_long(f[17]));
   set_field("src_ip", f[18]);

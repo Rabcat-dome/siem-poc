@@ -1,0 +1,63 @@
+{
+  "_comment": "Input for tools/sync_web_categories.py. categories -> category -> policy (block|monitor) -> list of sources. Keys starting with _ are ignored. Source types: {\"inline\": [...]}, {\"file\": \"path\"} (relative to this file), {\"url\": \"https://...\"} (plain or hosts-format list). Any source may set \"enabled\": false and \"max_domains\": N. Block rows are processed before monitor rows; the first category that lists a domain wins.",
+  "max_domains_per_source": 50000,
+  "opnsense_unbound_blocklist": {
+    "_comment": "Domains from Services > Unbound DNS > Blocklist (custom blocklist). Needs OPNSENSE_URL/KEY/SECRET. Off by default.",
+    "enabled": false,
+    "category": "custom-block",
+    "policy": "block"
+  },
+  "categories": {
+    "malware": {
+      "block": [
+        {"inline": ["cdn-update.malicious-c2.example"]},
+        {"_comment": "Example only, not verified: abuse.ch URLhaus host list.",
+         "enabled": false, "url": "https://urlhaus.abuse.ch/downloads/hostfile/", "max_domains": 20000}
+      ]
+    },
+    "phishing": {
+      "block": [
+        {"inline": ["login-microsoft-verify.example"]}
+      ]
+    },
+    "gambling": {
+      "block": [
+        {"inline": ["thaicasino-bet.example", "slot-888.example"]},
+        {"_comment": "Example only, not verified: Hagezi gambling domain list.",
+         "enabled": false, "url": "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/domains/gambling.txt", "max_domains": 20000}
+      ]
+    },
+    "adult": {
+      "block": [
+        {"inline": ["adult-videos.example"]},
+        {"_comment": "Example only, not verified: Hagezi NSFW domain list.",
+         "enabled": false, "url": "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/domains/nsfw.txt", "max_domains": 50000}
+      ]
+    },
+    "drugs": {
+      "block": [
+        {"inline": ["drugs-shop.example"]}
+      ]
+    },
+    "p2p": {
+      "block": [
+        {"inline": ["torrent-tracker.example", "piratebay-mirror.example"]}
+      ]
+    },
+    "social": {
+      "monitor": [
+        {"inline": ["facebook.com", "instagram.com", "tiktok.com"]}
+      ]
+    },
+    "streaming": {
+      "monitor": [
+        {"inline": ["youtube.com", "netflix.com"]}
+      ]
+    },
+    "cloud-storage": {
+      "monitor": [
+        {"inline": ["drive.google.com", "dropbox.com"]}
+      ]
+    }
+  }
+}

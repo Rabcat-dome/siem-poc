@@ -129,6 +129,19 @@ cd traffic-generator && OPNSENSE_DNS=192.168.1.1 docker compose up -d
 python3 traffic-generator/traffic_generator.py --dns 192.168.1.1 --play all
 ```
 
+## Dashboards (FR-11)
+
+provisioner สร้าง 4 dashboard ให้อัตโนมัติ (Graylog › Dashboards) ค่าตั้งต้นแสดง 24 ชั่วโมงล่าสุด
+
+| Dashboard | แสดงอะไร |
+|---|---|
+| SIEM - Overview (management) | จำนวน alert, admin login, login ล้มเหลว และ config change · ปริมาณ log ตามหมวด · alert ตามระดับ · หมวดเว็บที่ถูกบล็อก |
+| SIEM - Firewall & network | block เทียบ pass ตามเวลา · source และ port ที่ถูกบล็อกมากที่สุด · ตาราง zone ต้นทาง × ปลายทาง · Guest พยายามเข้าโซนภายใน (A.8.22) |
+| SIEM - Identity & admin | login หน้า GUI สำเร็จ/ล้มเหลว · login ล้มเหลวแยกตาม IP/user · VPN login ล้มเหลว · ตาราง config change ล่าสุด |
+| SIEM - Web filtering & threat | หมวดที่บล็อกและหมวดที่ monitor · เครื่องที่เข้าหมวดต้องห้าม · การเลี่ยง DNS filtering · IDS signature · threat intel hits |
+
+ถ้าแก้นิยาม dashboard ใน `provision.py` แล้วรัน provisioner ใหม่ dashboard จะถูกแทนที่ทั้งชุด (รวมถึงการแก้ใน UI) ถ้าไม่ได้แก้นิยาม จะไม่แตะของเดิม
+
 ## เครื่องมือ Phase 1
 
 **Retention (Q2):** provisioner ตั้ง log ให้ค้นได้ 90 วัน และประวัติ alert 365 วัน ปรับได้ด้วย `LOG_RETENTION_DAYS` / `EVENT_RETENTION_DAYS` ใน `.env`
@@ -153,6 +166,56 @@ docker compose run --rm tools /tools/monthly_report.py --last-days 1 --email-to 
 
 ไม่ใส่ `--last-days` จะสรุปเดือนก่อนหน้า ตั้ง cron วันที่ 1 ของทุกเดือนได้ ควรตั้ง `REPORT_USER=it-analyst` ใน `.env` เมื่อสร้าง user แล้ว
 
+## ทดสอบ pipeline กับ log ตัวอย่าง
+
+[tests/run_pipeline_tests.py](tests/run_pipeline_tests.py) ส่ง log ตัวอย่างใน [tests/pipeline_cases.json](tests/pipeline_cases.json) ผ่าน pipeline simulator ของ Graylog แล้วเทียบ field ที่ได้ (ตอนนี้มี 37 เคส ครอบคลุมทุก parse rule, การ enrich, filterlog IPv6 และ DHCP แบบ dnsmasq)
+
+```bash
+python3 tests/run_pipeline_tests.py            # ทุกเคส (exit 1 ถ้ามีเคสไม่ผ่าน)
+python3 tests/run_pipeline_tests.py -v ipv6    # เฉพาะเคสที่ชื่อมีคำว่า ipv6 พร้อมแสดง field ทั้งหมด
+```
+
+เมื่อได้ log จริงจาก OPNsense: copy เคสที่ใกล้เคียง ใส่บรรทัด syslog เต็มใน `raw` แล้วใส่ field ที่คาดหวังใน `expect` (`"*"` = ต้องมี field นี้) และ field ที่ต้องไม่มีใน `absent` ถ้าไม่ผ่าน ให้แก้ regex หรือ CSV index ใน `.rule` แล้วโหลด rule ใหม่ด้วย `docker compose run --rm provisioner` ก่อนรันซ้ำ
+
+## Sync ข้อมูลจาก OPNsense
+
+**Asset (Q5):** [tools/sync_assets.py](tools/sync_assets.py) สร้าง `assets.csv` จาก DHCP static mapping ของ OPNsense แล้วรวมกับ `graylog/lookup/assets_static.csv` (server, firewall และเครื่องที่ไม่ได้รับ IP จาก DHCP) ใส่ข้อมูลเจ้าของไว้ใน description ของ static mapping ตามรูปแบบ `owner=somchai.k;dept=Finance;crit=medium`
+
+```bash
+OPNSENSE_URL=https://192.168.99.1 OPNSENSE_KEY=... OPNSENSE_SECRET=... python3 tools/sync_assets.py --backend kea --insecure --dry-run
+```
+
+ใช้ `--backend kea` หรือ `--backend dnsmasq` ส่วน ISC dhcpd ไม่มี API ให้ export `config.xml` แล้วใช้ `--from-config-xml config.xml` แทน
+
+**หมวดเว็บ (Q13):** [tools/sync_web_categories.py](tools/sync_web_categories.py) สร้าง `web_categories.csv` จาก `graylog/lookup/web_categories_sources.json` (โดเมนที่พิมพ์เอง, ไฟล์ หรือ URL ของ list, มีเพดานจำนวนโดเมนต่อแหล่ง) ใส่ `--opnsense` เพื่อดึง custom blocklist ของ Unbound มารวมด้วย แหล่งแบบ URL ปิดไว้เป็นค่าตั้งต้น
+
+```text
+# crontab: asset ทุก 15 นาที, หมวดเว็บทุกคืน (Graylog อ่าน CSV ใหม่เองภายใน 60 วินาที)
+*/15 * * * * cd /opt/siem-poc && OPNSENSE_URL=... OPNSENSE_KEY=... OPNSENSE_SECRET=... python3 tools/sync_assets.py --backend kea --insecure
+30 2 * * *   cd /opt/siem-poc && python3 tools/sync_web_categories.py
+```
+
+endpoint ของ OPNsense ที่ใช้ยืนยันจากเอกสาร API แล้ว แต่ยังไม่ได้ทดสอบกับเครื่องจริง ทดสอบกับ mock เท่านั้น ควรรันด้วย `--dry-run` ก่อนครั้งแรก
+
+## ก่อนขึ้นระบบจริง (hardening)
+
+**Syslog over TLS (NFR-05):** สร้าง CA ส่วนตัวและ cert ของเครื่อง SIEM แล้วรัน provisioner จะได้ input `OPNsense Syslog TLS 6514`
+
+```bash
+sh tools/gen_tls_certs.sh siem.example.local 192.168.99.20
+docker compose up -d graylog && docker compose run --rm provisioner
+```
+
+cert อยู่ใน `tls/` ส่วน key ของ CA อยู่ใน `tls-ca/` (ทั้งสองโฟลเดอร์ไม่ถูก commit) ควรเก็บ key ของ CA ไว้นอกเครื่อง ฝั่ง OPNsense ให้ import `tls/ca.crt` ที่ System › Trust › Authorities แล้วเพิ่ม remote logging แบบ TLS ไปที่ port 6514 โดยใช้ hostname ให้ตรงกับชื่อใน cert
+
+**พอร์ตและการเปิดเข้าถึง:** ตั้งใน `.env` เช่น `SYSLOG_HOST_PORT=514`, `SYSLOG_TLS_HOST_PORT=6514` และ `GRAYLOG_UI_BIND=<IP ใน Management VLAN>:9000` (container ฟังที่ 1514/6514 เหมือนเดิม) อย่า bind UI เป็น `0.0.0.0` และให้ firewall ของเครื่อง SIEM รับ 514/6514 จาก OPNsense เท่านั้น
+
+**ตรวจก่อน go-live:** [tools/preflight_check.py](tools/preflight_check.py) ตรวจ `.env` และ cert แล้วแสดง PASS/WARN/FAIL (exit 1 ถ้ามี FAIL) เช่น รหัสผ่านตั้งต้น, secret ตั้งต้น, รหัสของ user RBAC ว่าง, cert หมดอายุภายใน 30 วัน และการ bind UI
+
+```bash
+python3 tools/preflight_check.py --env .env --tls-dir tls
+```
+
 ## โครงสร้าง repo
 
 ```text
@@ -166,6 +229,12 @@ webhook/receiver.py           # รับ HTTP notification แทน LINE/Teams
 traffic-generator/            # traffic จริงผ่าน OPNsense ทดสอบ + ตรวจว่า control บล็อกจริง
 tools/log_manifest.py         # SHA-256 manifest ของ log archive (NFR-11)
 tools/monthly_report.py       # รายงานรายเดือน RPT-01
+tools/sync_assets.py          # DHCP static mapping ของ OPNsense -> assets.csv
+tools/sync_web_categories.py  # แหล่ง blocklist -> web_categories.csv
+tests/                        # ชุดทดสอบ pipeline rule ผ่าน Graylog simulator
+tools/gen_tls_certs.sh        # CA + cert สำหรับ syslog over TLS
+tools/preflight_check.py      # ตรวจ .env และ cert ก่อนขึ้นระบบจริง
+provisioner/hardening.py      # input syslog TLS 6514
 reports/                      # ผลของ RPT-01 (ไม่ commit)
 docs/                         # requirement + diagram
 ```
@@ -202,9 +271,9 @@ High ส่งทั้ง Email และ Webhook ส่วน Medium/Low ส�
 ## ข้อจำกัดของ POC (ห้ามใช้เป็น production ตามนี้)
 
 - รหัสผ่าน `admin/admin` และ `GRAYLOG_PASSWORD_SECRET` เป็นค่าตั้งต้น ถ้าจะใช้จริงให้ตั้งใน `.env` (ดู `.env.example`) และเก็บรหัส root ไว้เป็น break-glass เหมือน `log-admin`
-- OpenSearch ปิด security plugin, syslog ไม่เข้ารหัส และ UI เป็น HTTP
-- filterlog parse เฉพาะ IPv4
-- Identity (IP → ผู้ใช้) มาจาก CSV แบบ static เท่านั้น
+- OpenSearch ปิด security plugin (ไม่ได้เปิด port ออกนอก docker network) และ UI ยังเป็น HTTP ส่วน syslog เข้ารหัสได้ผ่าน TLS 6514 เมื่อสร้าง cert แล้ว
+- Identity (IP → ผู้ใช้) มาจาก CSV ซึ่ง sync จาก DHCP static mapping ได้ แต่ยังไม่ได้ทดสอบกับ OPNsense จริง
+- filterlog IPv6 และ DHCP แบบ dnsmasq ทดสอบผ่าน simulator API เท่านั้น ยังไม่เคยเจอ traffic จริง
 
 ## ปิด / ล้างข้อมูล
 

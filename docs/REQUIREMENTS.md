@@ -7,6 +7,7 @@
 | POC | `docker compose up -d` ใน repo นี้ (ดู [README](../README.md)) |
 | Diagram | [docs/architecture.html](architecture.html) |
 | อ้างอิง | `Document_Summary_ISO27001_WebFiltering_Syslog.xlsx` (tab Web Filtering Guide, Syslog & Log Management) |
+| เอกสาร ISMS | [Logging policy, AUP, Incident procedure, Risk acceptance (Draft v0.1)](https://claude.ai/artifact/LU8dKuJ1aR4m8xxQbJbvXU) |
 
 ---
 
@@ -82,16 +83,16 @@ ISMS scope ครอบคลุม**ทั้งบริษัท สำนั
 | ID | Requirement | ระดับ | POC |
 |---|---|---|---|
 | FR-01 | รับ syslog จาก OPNsense ได้ทั้ง UDP/TCP (และ TLS ใน production) | M | ✅ UDP/TCP 1514 |
-| FR-02 | แยก field ของ firewall log (filterlog): action, direction, interface, rule, protocol, src/dst IP, port | M | ✅ IPv4 (IPv6 ⬜) |
+| FR-02 | แยก field ของ firewall log (filterlog): action, direction, interface, rule, protocol, src/dst IP, port | M | ✅ IPv4 + IPv6 (IPv6 ทดสอบผ่าน simulator API) |
 | FR-03 | แยก field ของ IDS alert (Suricata): signature, classification, priority, src/dst | M | ✅ |
 | FR-04 | แยก field ของ admin login (สำเร็จ/ล้มเหลว) และ configuration change พร้อมบอก user และ IP ต้นทาง | M | ✅ |
-| FR-05 | แยก field ของ VPN login/session (user → tunnel IP), DHCP lease (IP → MAC → hostname) และ DNS query | S | ✅ |
-| FR-06 | **Who**: ระบุ IP เป็นชื่อเครื่อง เจ้าของ แผนก และระดับความสำคัญของ asset โดยอาศัย DHCP static mapping ของเครื่องบริษัท (Q5) | M | ◐ static CSV; sync จาก OPNsense ⬜ |
+| FR-05 | แยก field ของ VPN login/session (user → tunnel IP), DHCP lease (IP → MAC → hostname) และ DNS query | S | ✅ (DHCP รองรับทั้ง ISC dhcpd และ dnsmasq) |
+| FR-06 | **Who**: ระบุ IP เป็นชื่อเครื่อง เจ้าของ แผนก และระดับความสำคัญของ asset โดยอาศัย DHCP static mapping ของเครื่องบริษัท (Q5) | M | ✅ CSV + `tools/sync_assets.py` จาก static mapping (ทดสอบกับ mock) |
 | FR-07 | **Where**: ระบุ network zone ต้นทาง/ปลายทาง และชื่อ firewall rule ที่ match | M | ✅ |
 | FR-08 | ตรวจ IP/domain กับ threat intelligence | S | ◐ list ภายใน; feed ภายนอก ⬜ |
 | FR-09 | Alert rules ตาม use case ในหัวข้อ 6 | M | ✅ 14 rules |
 | FR-10 | แจ้งเตือนผ่าน Email (SMTP บริษัท) ทุก severity (Q4) ส่วน Webhook เป็น optional สำหรับ ticketing | M | ✅ แบบจำลอง (Mailpit) |
-| FR-11 | Dashboard: ภาพรวมผู้บริหาร, firewall, auth, threat | S | ⬜ |
+| FR-11 | Dashboard: ภาพรวมผู้บริหาร, firewall, auth, threat | S | ✅ 4 dashboards สร้างโดย provisioner |
 | FR-12 | ติดตาม incident ตั้งแต่ alert จนปิดงาน (assign, status, หลักฐาน) | S | ⬜ ใช้ ticketing |
 | FR-13 | รายงานรายเดือนสำหรับ management review | S | ⬜ |
 | FR-14 | แจ้งเตือนเมื่อแหล่ง log หยุดส่ง | M | ✅ OPS-01 |
@@ -107,7 +108,7 @@ ISMS scope ครอบคลุม**ทั้งบริษัท สำนั
 | NFR-02 | **Time sync** | OPNsense sync จาก `time.nimt.or.th` และ `time.navy.mi.th` แล้วเป็น NTP server ภายในให้ทุกอุปกรณ์ (SIEM host, NAS, switch/AP, PC) เก็บ timestamp แบบ UTC และแสดงผลเป็น Asia/Bangkok | A.8.17 |
 | NFR-03 | **Integrity** | Admin ของ firewall ลบหรือแก้ log ใน SIEM ไม่ได้ (แยกหน้าที่) และ archive บน Synology เป็น WriteOnce/immutable ล็อก 1 ปี (Q10) | A.8.15, A.5.3 |
 | NFR-04 | **Access control** | RBAC ตาม Q16 (IT ดูและแก้ rule ได้แต่ลบ log ไม่ได้, admin เป็น break-glass ของผู้บริหาร), บัญชีรายบุคคล, MFA สำหรับ SIEM UI และ review สิทธิ์ทุกไตรมาส · POC ✅ user `it-analyst` / `log-admin` (ทดสอบแล้วว่าลบ log ไม่ได้) | A.5.15, A.8.2, A.8.5, A.5.3 |
-| NFR-05 | **Confidentiality in transit** | Syslog over TLS และ HTTPS สำหรับ UI | A.8.20, A.8.24 |
+| NFR-05 | **Confidentiality in transit** | Syslog over TLS และ HTTPS สำหรับ UI · POC ✅ input TLS 6514 + `tools/gen_tls_certs.sh` (ทดสอบ TLS 1.3 แล้ว), UI ยังเป็น HTTP | A.8.20, A.8.24 |
 | NFR-06 | **Capacity** | ✅ (Q6) < 50 คน ≈ ≤ 50 EPS: 4 vCPU / RAM 8 GB / disk 500 GB รองรับ EPS × 2 (ยืนยันด้วยค่าจริงใน Phase 0) | A.8.6 |
 | NFR-07 | **Backup** | Backup config ของ SIEM (MongoDB) และ pipeline/alert ในรูปแบบ code (repo นี้) | A.8.13 |
 | NFR-08 | **PDPA** | log มีข้อมูลส่วนบุคคล (IP, username) จึงต้องระบุวัตถุประสงค์ จำกัดสิทธิ์เข้าถึง และกำหนดระยะเวลาเก็บ | A.5.34 |

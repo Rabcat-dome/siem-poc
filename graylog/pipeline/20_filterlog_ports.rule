@@ -1,6 +1,7 @@
 rule "opnsense: filterlog ports (tcp/udp)"
 when
   to_string($message.event_category) == "firewall" &&
+  to_long($message.ip_version) == 4 &&
   (to_string($message.protocol) == "tcp" || to_string($message.protocol) == "udp")
 then
   let f = split(",", to_string($message.message));

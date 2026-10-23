@@ -1,0 +1,22 @@
+rule "opnsense: parse filterlog (IPv6)"
+when
+  to_string($message.application_name) == "filterlog" &&
+  regex("^(?:[^,]*,){8}6,", to_string($message.message)).matches == true
+then
+  // pf CSV (IPv6): rulenr,subrulenr,anchor,label(rid),iface,reason,action,dir,6,class,flowlabel,hoplimit,protoname,protonum,length,src,dst,
+  //   then tcp/udp: srcport,dstport,datalen (tcp continues flags,seq,ack,window,urg,options); ports are set by 20b_filterlog_ports_ipv6.rule
+  let f = split(",", to_string($message.message));
+  set_field("event_source", "opnsense");
+  set_field("event_category", "firewall");
+  set_field("event_type", concat("fw_", to_string(f[6])));
+  set_field("fw_rule_nr", f[0]);
+  set_field("fw_rule_id", f[3]);
+  set_field("fw_interface", f[4]);
+  set_field("fw_action", f[6]);
+  set_field("fw_direction", f[7]);
+  set_field("ip_version", 6);
+  set_field("protocol", f[12]);
+  set_field("packet_length", to_long(f[14]));
+  set_field("src_ip", f[15]);
+  set_field("dst_ip", f[16]);
+end

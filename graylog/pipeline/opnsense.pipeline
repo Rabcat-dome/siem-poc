@@ -1,6 +1,7 @@
 pipeline "OPNsense SIEM"
 stage 0 match pass
   rule "opnsense: parse filterlog (IPv4)";
+  rule "opnsense: parse filterlog (IPv6)";
   rule "opnsense: parse suricata alert";
   rule "opnsense: parse web GUI login failure";
   rule "opnsense: parse web GUI login success";
@@ -10,10 +11,12 @@ stage 0 match pass
   rule "opnsense: parse OpenVPN session (user -> tunnel IP)";
   rule "opnsense: parse OpenVPN TLS auth error";
   rule "opnsense: parse DHCP lease (ISC dhcpd)";
+  rule "opnsense: parse DHCP lease (dnsmasq)";
   rule "opnsense: parse Unbound DNS query";
   rule "siem tools: parse log manifest result";
 stage 1 match pass
   rule "opnsense: filterlog ports (tcp/udp)";
+  rule "opnsense: filterlog ports IPv6 (tcp/udp)";
   rule "enrich: source network zone";
   rule "enrich: destination network zone";
   rule "enrich: source asset owner (who)";

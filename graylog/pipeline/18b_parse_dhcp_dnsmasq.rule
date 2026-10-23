@@ -1,0 +1,12 @@
+rule "opnsense: parse DHCP lease (dnsmasq)"
+when
+  regex("^DHCPACK\\([^)]+\\) [0-9.]+ [0-9a-fA-F:]{17}", to_string($message.message)).matches == true
+then
+  // dnsmasq log_packet(): TYPE(interface) ADDR MAC [hostname]   e.g. DHCPACK(igb1) 192.168.10.21 3c:22:fb:10:00:21 LT-SOMCHAI
+  let m = regex("^DHCPACK\\(([^)]+)\\) ([0-9.]+) ([0-9a-fA-F:]{17})(?: (\\S+))?", to_string($message.message),
+                ["fw_interface", "src_ip", "src_mac", "dhcp_hostname"]);
+  set_field("event_source", "opnsense");
+  set_field("event_category", "dhcp");
+  set_field("event_type", "dhcp_lease");
+  set_fields(m);
+end

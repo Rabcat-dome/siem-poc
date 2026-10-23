@@ -3,19 +3,22 @@
 
 Creates (idempotently, matched by title/name):
   retention -> inputs -> lookup tables -> streams -> pipeline rules + pipeline -> notifications
-  -> alerts -> users (RBAC)
+  -> alerts -> dashboards -> users (RBAC)
 
 Safe to re-run: existing objects are left as they are, except pipeline rules,
-the pipeline and alerts, which are updated so edits in this repo apply.
+the pipeline and alerts, which are updated so edits in this repo apply. Dashboards
+are replaced only when their definition in this file has changed.
 """
 import base64
 import glob
+import hashlib
 import json
 import os
 import sys
 import time
 import urllib.error
 import urllib.request
+import uuid
 
 URL = os.getenv("GRAYLOG_URL", "http://localhost:9000").rstrip("/")
 AUTH = base64.b64encode(f"{os.getenv('GRAYLOG_USER', 'admin')}:{os.getenv('GRAYLOG_PASSWORD', 'admin')}".encode()).decode()
@@ -380,6 +383,163 @@ def ensure_alerts(streams, email_id, webhook_id):
             log("alert", d["title"], True)
 
 
+# --- dashboards (FR-11) -----------------------------------------------------
+
+DAY = {"type": "relative", "range": 86400}  # every widget defaults to the last 24 hours
+VIZ_CONFIG = {"bar": {"barmode": "stack", "axis_type": "linear", "axis_config": None},
+              "numeric": {"trend": False, "trend_preference": "NEUTRAL"}}
+
+
+def agg(title, query="", rows=(), cols=(), viz="table", streams=(), limit=10, w=6, h=4):
+    """count() widget. rows/cols: the fields of one row/column pivot; rows=["timestamp"] = histogram."""
+    return {"type": "aggregation", "title": title, "query": query, "rows": list(rows), "cols": list(cols),
+            "viz": viz, "streams": list(streams), "limit": limit, "w": w, "h": h}
+
+
+def number(title, query, streams):
+    return agg(title, query, viz="numeric", streams=streams, w=3, h=2)
+
+
+def messages(title, query, fields, streams, w=12, h=5):
+    return {"type": "messages", "title": title, "query": query, "fields": ["timestamp", *fields],
+            "streams": list(streams), "w": w, "h": h}
+
+
+def dashboard_specs(s):
+    """(title, summary, widgets); s maps stream title -> id."""
+    fw, ids, auth, conf, vpn = (s[f"OPNsense - {n}"] for n in ("firewall", "ids", "auth", "config", "vpn"))
+    ti, web, events = s["SIEM - Threat intel hits"], s["SIEM - Web filtering"], [EVENTS_STREAM]
+    guest_to_internal = "src_zone:Guest AND fw_action:block AND dst_zone:(Server OR LAN\\-Office OR Management)"
+    return [
+        ("SIEM - Overview (management)", "Log volume, alerts, web policy violations and privileged activity", [
+            number("Alerts", "", events),
+            number("Firewall admin logins", "event_type:gui_login_success", [auth]),
+            number("Failed admin logins", "event_type:gui_login_failure", [auth]),
+            number("Firewall config changes", "event_type:config_change", [conf]),
+            agg("Log volume by category", "event_source:opnsense", ["timestamp"], ["event_category"], "bar", w=12),
+            agg("Alerts over time by priority (1 low, 2 medium, 3 high)", "", ["timestamp"], ["priority"], "bar",
+                events),
+            agg("Top alerts", "", ["event_definition_id"], streams=events, limit=15),
+            agg("Top blocked web categories", "web_policy:block", ["web_category"], viz="pie", streams=[web]),
+            agg("Admin logins and config changes by user", "event_type:(gui_login_success OR config_change)",
+                ["user"], ["event_type"], streams=[auth, conf]),
+        ]),
+        ("SIEM - Firewall & network", "Passed vs blocked traffic, top blocked sources and ports, zone segregation", [
+            agg("Blocked vs passed over time", "", ["timestamp"], ["fw_action"], "bar", [fw], w=12),
+            agg("Top blocked sources", "fw_action:block", ["src_ip", "src_zone"], streams=[fw], limit=15),
+            agg("Top blocked destination ports", "fw_action:block", ["dst_port", "protocol"], streams=[fw], limit=15),
+            agg("Zone-to-zone matrix (rows: source zone, columns: destination zone)", "", ["src_zone"], ["dst_zone"],
+                streams=[fw]),
+            agg("Guest -> internal zones, blocked (ISO A.8.22)", guest_to_internal,
+                ["src_ip", "dst_zone", "dst_ip", "dst_port"], streams=[fw], limit=15),
+        ]),
+        ("SIEM - Identity & admin", "Firewall GUI logins, VPN authentication failures and configuration changes", [
+            agg("Firewall GUI logins over time", "event_type:(gui_login_success OR gui_login_failure)",
+                ["timestamp"], ["event_type"], "bar", [auth], w=12),
+            agg("Failed GUI logins by source", "event_type:gui_login_failure", ["src_ip", "src_zone", "user"],
+                streams=[auth], limit=15),
+            agg("VPN authentication failures by user", "event_type:vpn_auth_failure", ["vpn_user"],
+                streams=[vpn], limit=15),
+            messages("Recent firewall config changes", "event_type:config_change", ["user", "src_ip", "changed_via"],
+                     [conf]),
+        ]),
+        ("SIEM - Web filtering & threat", "Web category policy, DNS filter bypass, IDS alerts and threat-intel hits", [
+            agg("Blocked web categories", "web_policy:block", ["web_category"], viz="pie", streams=[web], w=4),
+            agg("Top hosts querying blocked categories", "web_policy:block", ["src_ip", "src_host", "src_owner"],
+                streams=[web], limit=15, w=8),
+            agg("Monitored category usage", "web_policy:monitor", ["web_category"], viz="bar", streams=[web], w=4),
+            agg("DNS filter bypass attempts by source (columns: port)", "fw_rule_tag:dns\\-bypass",
+                ["src_ip", "src_host"], ["dst_port"], streams=[web], w=8),
+            agg("IDS signatures", "", ["ids_signature", "ids_priority"], streams=[ids], limit=15),
+            agg("Threat-intel hits by IOC", "", ["threat_ioc", "threat_category"], ["event_category"],
+                streams=[ti], limit=15),
+        ]),
+    ]
+
+
+def _uid(*parts):
+    """Stable ids, so an unchanged definition always builds the same view."""
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, "siem-poc/" + "/".join(parts)))
+
+
+def _pivot(fields, limit):
+    if fields == ["timestamp"]:
+        return {"fields": fields, "type": "time", "config": {"interval": {"type": "auto", "scaling": 1.0}}}
+    return {"fields": fields, "type": "values", "config": {"limit": limit, "skip_empty_values": False}}
+
+
+def _widget(w, wid):
+    """-> (view widget, search type), in the shape the web UI saves them."""
+    common = {"timerange": DAY, "query": {"type": "elasticsearch", "query_string": w["query"]},
+              "streams": w["streams"], "stream_categories": [], "filter": None, "filters": []}
+    st = {**common, "id": _uid(wid, "search-type")}
+    if w["type"] == "messages":
+        cfg = {"fields": w["fields"], "show_message_row": False, "show_summary": False, "decorators": [],
+               "sort": [{"type": "pivot", "field": "timestamp", "direction": "Descending"}]}
+        st.update(type="messages", limit=150, offset=0, decorators=[], sort=[{"field": "timestamp", "order": "DESC"}])
+    else:
+        rows = [_pivot(w["rows"], w["limit"])] if w["rows"] else []
+        cols = [_pivot(w["cols"], w["limit"])] if w["cols"] else []
+        top_n = w["rows"] not in ([], ["timestamp"])
+        sort = [{"type": "series", "field": "count()", "direction": "Descending"}] if top_n else []
+        rollup = w["viz"] == "table" or not cols  # charts split by a column pivot get no "total" series
+        cfg = {"row_pivots": rows, "column_pivots": cols, "sort": sort, "rollup": rollup,
+               "series": [{"config": {"name": None, "thresholds": None}, "function": "count()"}],
+               "visualization": w["viz"], "visualization_config": VIZ_CONFIG.get(w["viz"]),
+               "formatting_settings": None, "event_annotation": False, "units": {}}
+        st.update(type="pivot", name="chart", rollup=rollup, sort=sort, series=[{"id": "count()", "type": "count"}],
+                  row_groups=[{"type": p["type"], "fields": p["fields"], **p["config"]} for p in rows],
+                  column_groups=[{"type": p["type"], "fields": p["fields"], **p["config"]} for p in cols])
+    return {**common, "id": wid, "type": w["type"], "config": cfg, "description": None, "context": None}, st
+
+
+def _layout(widgets):
+    """Flow widgets left to right over the 12-column grid."""
+    positions, row, col, row_height = {}, 1, 1, 0
+    for wid, w in widgets:
+        if col + w["w"] > 13:
+            row, col, row_height = row + row_height, 1, 0
+        positions[wid] = {"col": col, "row": row, "height": w["h"], "width": w["w"]}
+        col, row_height = col + w["w"], max(row_height, w["h"])
+    return positions
+
+
+def ensure_dashboards():
+    streams = {s["title"]: s["id"] for s in api("GET", "/api/streams")["streams"]}
+    existing = {v["title"]: v for v in api("GET", "/api/views?per_page=200")["views"] if v["type"] == "DASHBOARD"}
+    for title, summary, widgets in dashboard_specs(streams):
+        qid = _uid(title)
+        ids = [(_uid(title, w["title"]), w) for w in widgets]
+        built = [_widget(w, wid) for wid, w in ids]
+        state = {"selected_fields": None, "static_message_list_id": None,
+                 "titles": {"tab": {"title": title.split(" - ", 1)[-1]}, "widget": {wid: w["title"] for wid, w in ids}},
+                 "widgets": [widget for widget, _ in built],
+                 "widget_mapping": {widget["id"]: [st["id"]] for widget, st in built},
+                 "positions": _layout(ids), "formatting": {"highlighting": []},
+                 "display_mode_settings": {"positions": {}}}
+        query = {"id": qid, "query": {"type": "elasticsearch", "query_string": ""}, "timerange": DAY,
+                 "filter": None, "filters": [], "search_types": [st for _, st in built]}
+        # fingerprint of the definition, kept in the view's properties: unchanged -> leave UI edits alone
+        tag = "siem-poc-spec:" + hashlib.sha256(json.dumps([state, query], sort_keys=True).encode()).hexdigest()[:16]
+        current = existing.get(title)
+        if current and tag in current.get("properties", []):
+            log("dashboard", title, False)
+            continue
+        # a view points at a separate search holding the widgets' queries; like the UI, save a new one each time
+        # (Graylog removes searches no view references). Views, unlike searches, are wrapped in {"entity": ...}.
+        search_id = api("POST", "/api/views/search", {"queries": [query], "parameters": []})["id"]
+        view = {"type": "DASHBOARD", "title": title, "summary": summary,
+                "description": f"{summary}. Provisioned by provisioner/provision.py (FR-11); UI edits are replaced "
+                               "when the definition there changes.",
+                "search_id": search_id, "properties": [tag], "requires": {}, "state": {qid: state}}
+        if current:
+            api("PUT", f"/api/views/{current['id']}", {"entity": {**view, "id": current["id"]}})
+            print(f"  ~ updated  dashboard: {title}")
+        else:
+            api("POST", "/api/views", {"entity": view})
+            log("dashboard", f"{title} ({len(widgets)} widgets)", True)
+
+
 # --- users / RBAC (Q16) -----------------------------------------------------
 
 USERS = [
@@ -427,11 +587,13 @@ def main():
     wait_for_graylog()
     print("retention:");     ensure_retention()
     print("inputs:");        ensure_inputs()
+    from hardening import ensure_tls_input; ensure_tls_input()  # syslog over TLS 6514 (NFR-05)
     print("lookup tables:"); ensure_lookups()
     print("streams:");       streams = ensure_streams()
     print("pipeline:");      ensure_pipeline()
     print("notifications:"); email_id, webhook_id = ensure_notifications()
     print("alerts:");        ensure_alerts(streams, email_id, webhook_id)
+    print("dashboards:");    ensure_dashboards()
     print("users:");         ensure_users()
     print("done.")
 

@@ -5,7 +5,8 @@
 #   open http://localhost:8025     # Mailpit - alert e-mails
 #   open http://localhost:8088     # Webhook receiver - alerts as JSON (stand-in for LINE/Teams/ticketing)
 #
-# A real OPNsense box can send to this host on UDP/TCP 1514 at the same time as the simulator.
+# A real OPNsense box can send to this host on UDP/TCP 1514 (TLS 6514) at the same time as the simulator.
+# Production: set SYSLOG_HOST_PORT=514, SYSLOG_TLS_HOST_PORT=6514 and GRAYLOG_UI_BIND=<mgmt-vlan-ip>:9000 in .env.
 
 name: siem-poc
 
@@ -68,13 +69,15 @@ services:
       GRAYLOG_TRANSPORT_EMAIL_FROM_EMAIL: siem-poc@example.local
       GRAYLOG_TRANSPORT_EMAIL_WEB_INTERFACE_URL: http://localhost:9000
     ports:
-      - "127.0.0.1:9000:9000/tcp"   # Web UI + REST API
-      - "1514:1514/udp"             # Syslog UDP  (OPNsense: System > Settings > Logging > Remote)
-      - "1514:1514/tcp"             # Syslog TCP
+      - "${GRAYLOG_UI_BIND:-127.0.0.1:9000}:9000/tcp"   # Web UI + REST API (production: Management VLAN IP:9000)
+      - "${SYSLOG_HOST_PORT:-1514}:1514/udp"            # Syslog UDP  (OPNsense: System > Settings > Logging > Remote)
+      - "${SYSLOG_HOST_PORT:-1514}:1514/tcp"            # Syslog TCP
+      - "${SYSLOG_TLS_HOST_PORT:-6514}:6514/tcp"        # Syslog over TLS (needs ./tls, see tools/gen_tls_certs.sh)
     volumes:
       - graylog_data:/usr/share/graylog/data/data
       - graylog_journal:/usr/share/graylog/data/journal
       - ./graylog/lookup:/usr/share/graylog/data/lookup:ro
+      - ./tls:/usr/share/graylog/data/tls:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -fs http://localhost:9000/api/system/lbstatus | grep -q ALIVE"]
       interval: 10s
@@ -101,6 +104,7 @@ services:
     volumes:
       - ./graylog:/graylog:ro
       - ./provisioner:/app:ro
+      - ./tls:/tls:ro   # only to check that the TLS cert/key exist before creating the TLS input
     command: ["python", "-u", "/app/provision.py"]
     restart: "no"
     logging: *default-logging
