@@ -1,0 +1,12 @@
+rule "opnsense: parse web GUI login success"
+when
+  contains(to_string($message.message), "Successful login for user")
+then
+  let m = regex("Successful login for user '([^']*)' from: ?([0-9a-fA-F.:]+)", to_string($message.message), ["user", "src_ip"]);
+  set_field("event_source", "opnsense");
+  set_field("event_category", "auth");
+  set_field("event_type", "gui_login_success");
+  set_field("event_outcome", "success");
+  set_field("user", m["user"]);
+  set_field("src_ip", m["src_ip"]);
+end

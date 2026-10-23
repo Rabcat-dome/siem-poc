@@ -1,0 +1,6 @@
+rule "route: threat intel hits"
+when
+  to_bool($message.threat_indicator) == true
+then
+  route_to_stream(name: "SIEM - Threat intel hits");
+end

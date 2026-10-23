@@ -1,0 +1,13 @@
+rule "opnsense: parse OpenVPN login failure"
+when
+  starts_with(to_string($message.application_name), "openvpn") &&
+  regex("^user '[^']*' could not authenticate", to_string($message.message)).matches == true
+then
+  let m = regex("^user '([^']*)'", to_string($message.message), ["vpn_user"]);
+  set_field("event_source", "opnsense");
+  set_field("event_category", "vpn");
+  set_field("event_type", "vpn_auth_failure");
+  set_field("event_outcome", "failure");
+  set_field("vpn_user", m["vpn_user"]);
+  set_field("user", m["vpn_user"]);
+end

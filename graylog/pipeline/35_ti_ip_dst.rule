@@ -1,0 +1,9 @@
+rule "threat intel: destination IP is an IOC"
+when
+  has_field("dst_ip") &&
+  is_not_null(lookup_value("threat-intel-ip", to_string($message.dst_ip)))
+then
+  set_field("threat_indicator", true);
+  set_field("threat_ioc", $message.dst_ip);
+  set_field("threat_category", lookup_value("threat-intel-ip", to_string($message.dst_ip)));
+end

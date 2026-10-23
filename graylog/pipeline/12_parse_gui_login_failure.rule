@@ -1,0 +1,12 @@
+rule "opnsense: parse web GUI login failure"
+when
+  contains(to_string($message.message), "authentication error for user")
+then
+  let m = regex("authentication error for user '([^']*)' from: ?([0-9a-fA-F.:]+)", to_string($message.message), ["user", "src_ip"]);
+  set_field("event_source", "opnsense");
+  set_field("event_category", "auth");
+  set_field("event_type", "gui_login_failure");
+  set_field("event_outcome", "failure");
+  set_field("user", m["user"]);
+  set_field("src_ip", m["src_ip"]);
+end

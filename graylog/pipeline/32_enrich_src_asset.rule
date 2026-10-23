@@ -1,0 +1,11 @@
+rule "enrich: source asset owner (who)"
+when
+  has_field("src_ip") &&
+  is_not_null(lookup_value("asset-hostname", to_string($message.src_ip)))
+then
+  let ip = to_string($message.src_ip);
+  set_field("src_host", lookup_value("asset-hostname", ip));
+  set_field("src_owner", lookup_value("asset-owner", ip));
+  set_field("src_department", lookup_value("asset-department", ip));
+  set_field("src_criticality", lookup_value("asset-criticality", ip));
+end

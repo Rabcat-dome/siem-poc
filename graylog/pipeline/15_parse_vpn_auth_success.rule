@@ -1,0 +1,13 @@
+rule "opnsense: parse OpenVPN login success"
+when
+  starts_with(to_string($message.application_name), "openvpn") &&
+  regex("^user '[^']*' authenticated", to_string($message.message)).matches == true
+then
+  let m = regex("^user '([^']*)'", to_string($message.message), ["vpn_user"]);
+  set_field("event_source", "opnsense");
+  set_field("event_category", "vpn");
+  set_field("event_type", "vpn_auth_success");
+  set_field("event_outcome", "success");
+  set_field("vpn_user", m["vpn_user"]);
+  set_field("user", m["vpn_user"]);
+end

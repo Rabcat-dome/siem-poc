@@ -1,0 +1,6 @@
+rule "enrich: source network zone"
+when
+  has_field("src_ip")
+then
+  set_field("src_zone", lookup_value("network-zones", to_string($message.src_ip)));
+end

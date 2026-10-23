@@ -1,0 +1,12 @@
+rule "opnsense: parse OpenVPN TLS auth error"
+when
+  starts_with(to_string($message.application_name), "openvpn") &&
+  contains(to_string($message.message), "TLS Auth Error")
+then
+  let m = regex("^([0-9a-fA-F.:]+?):(\\d+) TLS Auth Error", to_string($message.message), ["src_ip", "src_port"]);
+  set_field("event_source", "opnsense");
+  set_field("event_category", "vpn");
+  set_field("event_type", "vpn_tls_error");
+  set_field("event_outcome", "failure");
+  set_field("src_ip", m["src_ip"]);
+end

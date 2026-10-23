@@ -1,0 +1,6 @@
+rule "enrich: local hour (for after-hours detection)"
+when
+  has_field("event_source")
+then
+  set_field("local_hour", to_long(format_date(to_date($message.timestamp), "H", "Asia/Bangkok")));
+end

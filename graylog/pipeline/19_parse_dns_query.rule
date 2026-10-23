@@ -1,0 +1,13 @@
+rule "opnsense: parse Unbound DNS query"
+when
+  to_string($message.application_name) == "unbound" &&
+  contains(to_string($message.message), " info: ")
+then
+  let m = regex("info: ([0-9a-fA-F.:]+) (\\S+?)\\.? (\\S+) IN", to_string($message.message), ["src_ip", "dns_query", "dns_qtype"]);
+  set_field("event_source", "opnsense");
+  set_field("event_category", "dns");
+  set_field("event_type", "dns_query");
+  set_field("src_ip", m["src_ip"]);
+  set_field("dns_query", lowercase(to_string(m["dns_query"])));
+  set_field("dns_qtype", m["dns_qtype"]);
+end

@@ -1,0 +1,6 @@
+rule "enrich: firewall rule description"
+when
+  has_field("fw_rule_id")
+then
+  set_field("fw_rule_desc", lookup_value("fw-rules", to_string($message.fw_rule_id)));
+end

@@ -1,0 +1,9 @@
+rule "threat intel: DNS query to IOC domain"
+when
+  has_field("dns_query") &&
+  is_not_null(lookup_value("threat-intel-domain", to_string($message.dns_query)))
+then
+  set_field("threat_indicator", true);
+  set_field("threat_ioc", $message.dns_query);
+  set_field("threat_category", lookup_value("threat-intel-domain", to_string($message.dns_query)));
+end

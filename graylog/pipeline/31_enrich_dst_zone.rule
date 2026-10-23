@@ -1,0 +1,6 @@
+rule "enrich: destination network zone"
+when
+  has_field("dst_ip")
+then
+  set_field("dst_zone", lookup_value("network-zones", to_string($message.dst_ip)));
+end

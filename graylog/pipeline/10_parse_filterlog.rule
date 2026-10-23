@@ -1,0 +1,20 @@
+rule "opnsense: parse filterlog (IPv4)"
+when
+  to_string($message.application_name) == "filterlog" &&
+  regex("^(?:[^,]*,){8}4,", to_string($message.message)).matches == true
+then
+  // pf CSV: rulenr,subrulenr,anchor,label(rid),iface,reason,action,dir,ipver,tos,ecn,ttl,id,offset,flags,protonum,proto,length,src,dst,...
+  let f = split(",", to_string($message.message));
+  set_field("event_source", "opnsense");
+  set_field("event_category", "firewall");
+  set_field("event_type", concat("fw_", to_string(f[6])));
+  set_field("fw_rule_nr", f[0]);
+  set_field("fw_rule_id", f[3]);
+  set_field("fw_interface", f[4]);
+  set_field("fw_action", f[6]);
+  set_field("fw_direction", f[7]);
+  set_field("protocol", f[16]);
+  set_field("packet_length", to_long(f[17]));
+  set_field("src_ip", f[18]);
+  set_field("dst_ip", f[19]);
+end

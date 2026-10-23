@@ -1,0 +1,28 @@
+pipeline "OPNsense SIEM"
+stage 0 match pass
+  rule "opnsense: parse filterlog (IPv4)";
+  rule "opnsense: parse suricata alert";
+  rule "opnsense: parse web GUI login failure";
+  rule "opnsense: parse web GUI login success";
+  rule "opnsense: parse configuration change";
+  rule "opnsense: parse OpenVPN login success";
+  rule "opnsense: parse OpenVPN login failure";
+  rule "opnsense: parse OpenVPN session (user -> tunnel IP)";
+  rule "opnsense: parse OpenVPN TLS auth error";
+  rule "opnsense: parse DHCP lease (ISC dhcpd)";
+  rule "opnsense: parse Unbound DNS query";
+stage 1 match pass
+  rule "opnsense: filterlog ports (tcp/udp)";
+  rule "enrich: source network zone";
+  rule "enrich: destination network zone";
+  rule "enrich: source asset owner (who)";
+  rule "enrich: destination asset";
+  rule "enrich: firewall rule description";
+  rule "threat intel: destination IP is an IOC";
+  rule "threat intel: source IP is an IOC";
+  rule "threat intel: DNS query to IOC domain";
+  rule "enrich: local hour (for after-hours detection)";
+stage 2 match pass
+  rule "route: OPNsense category stream";
+  rule "route: threat intel hits";
+end

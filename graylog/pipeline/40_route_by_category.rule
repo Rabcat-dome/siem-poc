@@ -1,0 +1,7 @@
+rule "route: OPNsense category stream"
+when
+  has_field("event_category")
+then
+  // streams are named "OPNsense - <category>" by the provisioner
+  route_to_stream(name: concat("OPNsense - ", to_string($message.event_category)));
+end

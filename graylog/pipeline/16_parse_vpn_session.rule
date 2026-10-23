@@ -1,0 +1,15 @@
+rule "opnsense: parse OpenVPN session (user -> tunnel IP)"
+when
+  starts_with(to_string($message.application_name), "openvpn") &&
+  contains(to_string($message.message), "pool returned IPv4=")
+then
+  let m = regex("^([^/]+)/([0-9a-fA-F.:]+?):(\\d+) MULTI_sva: pool returned IPv4=([0-9.]+)", to_string($message.message),
+                ["vpn_user", "src_ip", "src_port", "vpn_assigned_ip"]);
+  set_field("event_source", "opnsense");
+  set_field("event_category", "vpn");
+  set_field("event_type", "vpn_session_start");
+  set_field("vpn_user", m["vpn_user"]);
+  set_field("user", m["vpn_user"]);
+  set_field("src_ip", m["src_ip"]);
+  set_field("vpn_assigned_ip", m["vpn_assigned_ip"]);
+end

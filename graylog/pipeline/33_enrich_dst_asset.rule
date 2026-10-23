@@ -1,0 +1,10 @@
+rule "enrich: destination asset"
+when
+  has_field("dst_ip") &&
+  is_not_null(lookup_value("asset-hostname", to_string($message.dst_ip)))
+then
+  let ip = to_string($message.dst_ip);
+  set_field("dst_host", lookup_value("asset-hostname", ip));
+  set_field("dst_owner", lookup_value("asset-owner", ip));
+  set_field("dst_criticality", lookup_value("asset-criticality", ip));
+end

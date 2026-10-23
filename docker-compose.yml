@@ -1,0 +1,141 @@
+# SIEM POC: OPNsense logs -> Graylog (parse, enrich, alert) -> Email / Webhook
+#
+#   docker compose up -d          # start everything
+#   open http://localhost:9000     # Graylog (admin / see GRAYLOG_ADMIN_PASSWORD)
+#   open http://localhost:8025     # Mailpit - alert e-mails
+#   open http://localhost:8088     # Webhook receiver - alerts as JSON (stand-in for LINE/Teams/ticketing)
+#
+# A real OPNsense box can send to this host on UDP/TCP 1514 at the same time as the simulator.
+
+name: siem-poc
+
+x-logging: &default-logging
+  driver: json-file
+  options: { max-size: "10m", max-file: "3" }
+
+services:
+  mongodb:
+    image: mongo:7.0
+    restart: unless-stopped
+    volumes:
+      - mongodb_data:/data/db
+    logging: *default-logging
+
+  opensearch:
+    image: opensearchproject/opensearch:2.19.5
+    restart: unless-stopped
+    environment:
+      - OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g
+      - discovery.type=single-node
+      - action.auto_create_index=false
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+      - DISABLE_SECURITY_PLUGIN=true   # POC only - enable TLS/auth in production
+    ulimits:
+      memlock: { soft: -1, hard: -1 }
+      nofile: { soft: 65536, hard: 65536 }
+    volumes:
+      - opensearch_data:/usr/share/opensearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      retries: 30
+    logging: *default-logging
+
+  graylog:
+    image: graylog/graylog:7.1.11
+    restart: unless-stopped
+    depends_on:
+      mongodb: { condition: service_started }
+      opensearch: { condition: service_healthy }
+    entrypoint: /usr/bin/tini -- /docker-entrypoint.sh
+    environment:
+      GRAYLOG_NODE_ID_FILE: /usr/share/graylog/data/data/node-id
+      GRAYLOG_HTTP_BIND_ADDRESS: 0.0.0.0:9000
+      GRAYLOG_HTTP_EXTERNAL_URI: http://localhost:9000/
+      GRAYLOG_ELASTICSEARCH_HOSTS: http://opensearch:9200
+      GRAYLOG_MONGODB_URI: mongodb://mongodb:27017/graylog
+      GRAYLOG_PASSWORD_SECRET: ${GRAYLOG_PASSWORD_SECRET:-poc-only-change-me-0123456789abcdef0123456789abcdef}
+      GRAYLOG_ROOT_PASSWORD_SHA2: ${GRAYLOG_ROOT_PASSWORD_SHA2:-8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918}
+      GRAYLOG_ROOT_TIMEZONE: Asia/Bangkok
+      GRAYLOG_MESSAGE_JOURNAL_MAX_SIZE: 2gb
+      # alert e-mails go to Mailpit (swap for the company SMTP relay later)
+      GRAYLOG_TRANSPORT_EMAIL_ENABLED: "true"
+      GRAYLOG_TRANSPORT_EMAIL_HOSTNAME: mailpit
+      GRAYLOG_TRANSPORT_EMAIL_PORT: 1025
+      GRAYLOG_TRANSPORT_EMAIL_USE_AUTH: "false"
+      GRAYLOG_TRANSPORT_EMAIL_USE_TLS: "false"
+      GRAYLOG_TRANSPORT_EMAIL_USE_SSL: "false"
+      GRAYLOG_TRANSPORT_EMAIL_FROM_EMAIL: siem-poc@example.local
+      GRAYLOG_TRANSPORT_EMAIL_WEB_INTERFACE_URL: http://localhost:9000
+    ports:
+      - "127.0.0.1:9000:9000/tcp"   # Web UI + REST API
+      - "1514:1514/udp"             # Syslog UDP  (OPNsense: System > Settings > Logging > Remote)
+      - "1514:1514/tcp"             # Syslog TCP
+    volumes:
+      - graylog_data:/usr/share/graylog/data/data
+      - graylog_journal:/usr/share/graylog/data/journal
+      - ./graylog/lookup:/usr/share/graylog/data/lookup:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:9000/api/system/lbstatus | grep -q ALIVE"]
+      interval: 10s
+      start_period: 60s
+      retries: 30
+    logging: *default-logging
+
+  # one-shot: creates inputs, lookup tables, pipeline, streams, alerts via the Graylog REST API
+  provisioner:
+    image: python:3.12-alpine
+    depends_on:
+      graylog: { condition: service_healthy }
+    environment:
+      GRAYLOG_URL: http://graylog:9000
+      GRAYLOG_USER: admin
+      GRAYLOG_PASSWORD: ${GRAYLOG_ADMIN_PASSWORD:-admin}
+      ALERT_EMAIL_TO: soc-team@example.local
+      WEBHOOK_URL: http://webhook:8088/alert
+    volumes:
+      - ./graylog:/graylog:ro
+      - ./provisioner:/app:ro
+    command: ["python", "-u", "/app/provision.py"]
+    restart: "no"
+    logging: *default-logging
+
+  # OPNsense log simulator - fires a batch every INTERVAL_SECONDS
+  generator:
+    image: python:3.12-alpine
+    restart: unless-stopped
+    depends_on:
+      provisioner: { condition: service_completed_successfully }
+    environment:
+      SYSLOG_HOST: graylog
+      SYSLOG_PORT: 1514
+      SYSLOG_PROTO: udp
+      INTERVAL_SECONDS: ${INTERVAL_SECONDS:-5}
+      SCENARIO_RATE: ${SCENARIO_RATE:-0.25}
+    volumes:
+      - ./generator:/app:ro
+    command: ["python", "-u", "/app/opnsense_simulator.py"]
+    logging: *default-logging
+
+  mailpit:
+    image: axllent/mailpit:v1.31.4
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8025:8025"
+    logging: *default-logging
+
+  webhook:
+    image: python:3.12-alpine
+    restart: unless-stopped
+    volumes:
+      - ./webhook:/app:ro
+    command: ["python", "-u", "/app/receiver.py"]
+    ports:
+      - "127.0.0.1:8088:8088"
+    logging: *default-logging
+
+volumes:
+  mongodb_data:
+  opensearch_data:
+  graylog_data:
+  graylog_journal:

@@ -1,0 +1,21 @@
+rule "opnsense: parse suricata alert"
+when
+  to_string($message.application_name) == "suricata" &&
+  contains(to_string($message.message), "[Classification:")
+then
+  let m = regex("^\\[(\\d+):(\\d+):(\\d+)\\] (.+?) \\[Classification: (.*?)\\] \\[Priority: (\\d+)\\] \\{(\\w+)\\} ([0-9a-fA-F.:]+?):(\\d+) -> ([0-9a-fA-F.:]+?):(\\d+)",
+                to_string($message.message),
+                ["gid", "sid", "rev", "signature", "classification", "priority", "proto", "src_ip", "src_port", "dst_ip", "dst_port"]);
+  set_field("event_source", "opnsense");
+  set_field("event_category", "ids");
+  set_field("event_type", "ids_alert");
+  set_field("ids_sid", to_long(m["sid"]));
+  set_field("ids_signature", m["signature"]);
+  set_field("ids_classification", m["classification"]);
+  set_field("ids_priority", to_long(m["priority"]));
+  set_field("protocol", lowercase(to_string(m["proto"])));
+  set_field("src_ip", m["src_ip"]);
+  set_field("src_port", to_long(m["src_port"]));
+  set_field("dst_ip", m["dst_ip"]);
+  set_field("dst_port", to_long(m["dst_port"]));
+end

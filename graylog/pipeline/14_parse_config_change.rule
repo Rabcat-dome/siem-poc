@@ -1,0 +1,14 @@
+rule "opnsense: parse configuration change"
+when
+  contains(to_string($message.message), "changed configuration to")
+then
+  let m = regex("user ([^@\\s]+)(?:@(\\S+))? changed configuration to (\\S+) in (\\S+)", to_string($message.message),
+                ["user", "src_ip", "config_backup", "changed_via"]);
+  set_field("event_source", "opnsense");
+  set_field("event_category", "config");
+  set_field("event_type", "config_change");
+  set_field("user", m["user"]);
+  set_field("src_ip", m["src_ip"]);
+  set_field("config_backup", m["config_backup"]);
+  set_field("changed_via", m["changed_via"]);
+end

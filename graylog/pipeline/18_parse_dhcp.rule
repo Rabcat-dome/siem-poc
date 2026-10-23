@@ -1,0 +1,11 @@
+rule "opnsense: parse DHCP lease (ISC dhcpd)"
+when
+  contains(to_string($message.message), "DHCPACK on ")
+then
+  let m = regex("DHCPACK on ([0-9.]+) to ([0-9a-fA-F:]{17})(?: \\(([^)]*)\\))? via (\\S+)", to_string($message.message),
+                ["src_ip", "src_mac", "dhcp_hostname", "fw_interface"]);
+  set_field("event_source", "opnsense");
+  set_field("event_category", "dhcp");
+  set_field("event_type", "dhcp_lease");
+  set_fields(m);
+end
