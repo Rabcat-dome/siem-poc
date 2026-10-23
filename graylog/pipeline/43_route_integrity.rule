@@ -1,0 +1,6 @@
+rule "route: log integrity"
+when
+  to_string($message.event_category) == "integrity"
+then
+  route_to_stream(name: "SIEM - Log integrity");
+end

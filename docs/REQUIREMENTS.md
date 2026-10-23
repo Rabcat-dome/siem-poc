@@ -69,7 +69,7 @@ ISMS scope ครอบคลุม**ทั้งบริษัท สำนั
 | แหล่ง log | OPNsense (จำลอง + เครื่องจริงได้) | OPNsense จริง | **Switch / Wi-Fi AP** (Q9) |
 | ขนส่ง | Syslog UDP/TCP | **Syslog over TLS** | Graylog Sidecar / agent |
 | Identity | Static CSV | **DHCP static mapping (Q5)** + VPN user, sync mapping → CSV | (ถ้าต้องการ) Captive portal สำหรับ Guest |
-| Alert | 13 use cases | ปรับ threshold จากข้อมูลจริง | Correlation หลายแหล่ง |
+| Alert | 14 use cases | ปรับ threshold จากข้อมูลจริง | Correlation หลายแหล่ง |
 | แจ้งเตือน | Mailpit + webhook จำลอง | SMTP บริษัท + LINE OA/Teams | Ticketing / SOAR |
 | Process | - | Playbook, รอบ review | Monthly report, tabletop exercise |
 
@@ -89,7 +89,7 @@ ISMS scope ครอบคลุม**ทั้งบริษัท สำนั
 | FR-06 | **Who**: ระบุ IP เป็นชื่อเครื่อง เจ้าของ แผนก และระดับความสำคัญของ asset โดยอาศัย DHCP static mapping ของเครื่องบริษัท (Q5) | M | ◐ static CSV; sync จาก OPNsense ⬜ |
 | FR-07 | **Where**: ระบุ network zone ต้นทาง/ปลายทาง และชื่อ firewall rule ที่ match | M | ✅ |
 | FR-08 | ตรวจ IP/domain กับ threat intelligence | S | ◐ list ภายใน; feed ภายนอก ⬜ |
-| FR-09 | Alert rules ตาม use case ในหัวข้อ 6 | M | ✅ 13 rules |
+| FR-09 | Alert rules ตาม use case ในหัวข้อ 6 | M | ✅ 14 rules |
 | FR-10 | แจ้งเตือนผ่าน Email (SMTP บริษัท) ทุก severity (Q4) ส่วน Webhook เป็น optional สำหรับ ticketing | M | ✅ แบบจำลอง (Mailpit) |
 | FR-11 | Dashboard: ภาพรวมผู้บริหาร, firewall, auth, threat | S | ⬜ |
 | FR-12 | ติดตาม incident ตั้งแต่ alert จนปิดงาน (assign, status, หลักฐาน) | S | ⬜ ใช้ ticketing |
@@ -97,23 +97,23 @@ ISMS scope ครอบคลุม**ทั้งบริษัท สำนั
 | FR-14 | แจ้งเตือนเมื่อแหล่ง log หยุดส่ง | M | ✅ OPS-01 |
 | FR-15 | รับ log จาก Switch และ Wi-Fi AP (Q9) ส่วน NAS/Windows/M365 ยังไม่อยู่ในแผน | S | ⬜ Phase 2 |
 | FR-16 | **Web filtering** แบบ DNS: บล็อกหมวด Security risks และ Illegal บังคับให้ทุกเครื่องใช้ DNS ของ firewall และบล็อก DoH/DoT (หัวข้อ 12.2) | M | ⬜ ตั้งค่าบน OPNsense |
-| FR-17 | SIEM ตรวจการเข้าหมวดต้องห้ามและการเลี่ยง DNS filtering (WEB-01, WEB-02) พร้อมรายงานรายเดือนสำหรับ A.8.23 | S | ◐ WEB-01/02 ✅ POC, RPT-01 ⬜ |
+| FR-17 | SIEM ตรวจการเข้าหมวดต้องห้ามและการเลี่ยง DNS filtering (WEB-01, WEB-02) พร้อมรายงานรายเดือนสำหรับ A.8.23 | S | ✅ POC: WEB-01/02 + `tools/monthly_report.py` |
 
 ## 5. Non-functional requirements
 
 | ID | Requirement | ค่าที่เสนอ (รอยืนยัน) | ISO |
 |---|---|---|---|
-| NFR-01 | **Retention** | ✅ ยืนยันแล้ว (Q2): Hot ใน Graylog **90 วัน** (index rotate รายวัน เก็บ 90 index) + archive บน Synology **1 ปี** (ดูหมายเหตุกฎหมายด้านล่าง) | A.8.15, A.5.31 |
+| NFR-01 | **Retention** | ✅ ยืนยันแล้ว (Q2): Hot ใน Graylog **90 วัน** (data tiering แบบ hot-only ลบ index เมื่อข้อมูลเก่ากว่า 90–95 วัน) + archive บน Synology **1 ปี** (ดูหมายเหตุกฎหมายด้านล่าง) · POC ✅ provisioner ตั้ง index set แล้ว (events 365 วัน) | A.8.15, A.5.31 |
 | NFR-02 | **Time sync** | OPNsense sync จาก `time.nimt.or.th` และ `time.navy.mi.th` แล้วเป็น NTP server ภายในให้ทุกอุปกรณ์ (SIEM host, NAS, switch/AP, PC) เก็บ timestamp แบบ UTC และแสดงผลเป็น Asia/Bangkok | A.8.17 |
 | NFR-03 | **Integrity** | Admin ของ firewall ลบหรือแก้ log ใน SIEM ไม่ได้ (แยกหน้าที่) และ archive บน Synology เป็น WriteOnce/immutable ล็อก 1 ปี (Q10) | A.8.15, A.5.3 |
-| NFR-04 | **Access control** | RBAC ตาม Q16 (IT ดูและแก้ rule ได้แต่ลบ log ไม่ได้, admin เป็น break-glass ของผู้บริหาร), บัญชีรายบุคคล, MFA สำหรับ SIEM UI และ review สิทธิ์ทุกไตรมาส | A.5.15, A.8.2, A.8.5, A.5.3 |
+| NFR-04 | **Access control** | RBAC ตาม Q16 (IT ดูและแก้ rule ได้แต่ลบ log ไม่ได้, admin เป็น break-glass ของผู้บริหาร), บัญชีรายบุคคล, MFA สำหรับ SIEM UI และ review สิทธิ์ทุกไตรมาส · POC ✅ user `it-analyst` / `log-admin` (ทดสอบแล้วว่าลบ log ไม่ได้) | A.5.15, A.8.2, A.8.5, A.5.3 |
 | NFR-05 | **Confidentiality in transit** | Syslog over TLS และ HTTPS สำหรับ UI | A.8.20, A.8.24 |
 | NFR-06 | **Capacity** | ✅ (Q6) < 50 คน ≈ ≤ 50 EPS: 4 vCPU / RAM 8 GB / disk 500 GB รองรับ EPS × 2 (ยืนยันด้วยค่าจริงใน Phase 0) | A.8.6 |
 | NFR-07 | **Backup** | Backup config ของ SIEM (MongoDB) และ pipeline/alert ในรูปแบบ code (repo นี้) | A.8.13 |
 | NFR-08 | **PDPA** | log มีข้อมูลส่วนบุคคล (IP, username) จึงต้องระบุวัตถุประสงค์ จำกัดสิทธิ์เข้าถึง และกำหนดระยะเวลาเก็บ | A.5.34 |
 | NFR-09 | **Alert latency** | Alert ถึงผู้รับภายใน 2 นาทีหลังเกิดเหตุ | A.8.16 |
 | NFR-10 | **Response SLA** | ✅ (Q3) IT in-house รับ alert, High: เริ่มตรวจสอบภายใน 1 ชม. ในเวลาทำการ / ภายใน 2 ชม. แรกของวันทำการถัดไปถ้าเกิดนอกเวลา (นอกเวลาเป็น best effort) | A.5.24, A.5.26 |
-| NFR-11 | **Log hashing** | สร้าง manifest SHA-256 ของไฟล์ archive ทุกวัน เก็บไว้ใน folder WriteOnce แยกจากไฟล์ log และสุ่มตรวจ hash ทุกเดือน (บันทึกผลเป็นหลักฐาน) | A.8.15, A.5.28 |
+| NFR-11 | **Log hashing** | สร้าง manifest SHA-256 ของไฟล์ archive ทุกวัน เก็บไว้ใน folder WriteOnce แยกจากไฟล์ log และสุ่มตรวจ hash ทุกเดือน (บันทึกผลเป็นหลักฐาน) · POC ✅ `tools/log_manifest.py` + alert OPS-02 | A.8.15, A.5.28 |
 
 > **หมายเหตุกฎหมาย:** พ.ร.บ.ว่าด้วยการกระทำความผิดเกี่ยวกับคอมพิวเตอร์ มาตรา 26 กำหนดให้ผู้ให้บริการเก็บข้อมูลจราจรทางคอมพิวเตอร์ไม่น้อยกว่า 90 วัน (เจ้าหน้าที่สั่งขยายได้ไม่เกิน 2 ปี) และประกาศกระทรวงที่เกี่ยวข้องกำหนดให้ต้องระบุตัวผู้ใช้บริการได้ องค์กรที่ให้พนักงานใช้อินเทอร์เน็ตมักถูกนับเป็นผู้ให้บริการ จึงตรงกับโจทย์ "ใครทำ" ข้างต้น **ควรให้ฝ่ายกฎหมายหรือที่ปรึกษายืนยันการตีความกับบริษัท**
 
@@ -148,6 +148,7 @@ RAM: ≤ 50 EPS ใช้ 8 GB รวม (OpenSearch heap 2 GB, Graylog heap 1�
 | THR-03 | Threat intel / DNS | DNS query ไป domain อันตราย | domain ตรงกับ TI list (phishing/C2) | High | A.5.7, A.8.23 | Email + Webhook |
 | WEB-01 | Web filtering | เข้าหมวดที่ถูกบล็อกซ้ำ | DNS query หมวด `block` (พนัน, ลามก, ยาเสพติด, P2P, malware) ≥ 10 ครั้ง/ชม. ต่อ `src_ip` | Medium | A.8.23 | Email |
 | WEB-02 | Web filtering | พยายามเลี่ยง DNS filtering | ถูกบล็อกตอนออก DoT 853, DNS 53 ไปเซิร์ฟเวอร์ภายนอก หรือ DoH resolver ≥ 3 ครั้ง/5 นาที | Medium | A.8.23, A.8.20 | Email |
+| OPS-02 | Log integrity | ตรวจ SHA-256 ของ archive ไม่ผ่าน | `log_manifest.py verify` พบไฟล์ถูกแก้หรือหาย | High | A.8.15, A.5.28 | Email + Webhook |
 | OPS-01 | Log health | OPNsense หยุดส่ง log | ไม่มี log จาก OPNsense ใน 5 นาที | High | A.8.15, A.8.16 | Email + Webhook |
 
 > คอลัมน์ "แจ้งเตือน" แสดงพฤติกรรมของ POC ส่วนใน production ทุก alert ส่ง **Email อย่างเดียว** ตาม Q4
@@ -331,14 +332,14 @@ RAM: ≤ 50 EPS ใช้ 8 GB รวม (OpenSearch heap 2 GB, Graylog heap 1�
 1. OPNsense จริงส่ง log เข้า Graylog ได้ และแสดงผลภายใน 10 วินาที
 2. filterlog ≥ 95% parse สำเร็จ (ไม่มี `gl2_processing_error`)
 3. สำหรับ incident ตัวอย่าง ทีมตอบได้ภายใน 1 นาทีว่า ใคร / เครื่องไหน / จาก zone ไหน / ไปที่ไหน / rule ไหน
-4. Alert ทั้ง 13 ข้อทำงาน และแจ้งเตือนถึง Email/Webhook ภายใน 2 นาที
+4. Alert ทั้ง 14 ข้อทำงาน และแจ้งเตือนถึง Email/Webhook ภายใน 2 นาที
 5. ทีมสาธิต walkthrough แบบที่จะทำให้ auditor ดูได้ (alert → สืบสวน → หลักฐาน)
 
 ## 11. Roadmap
 
 | Phase | ระยะเวลา (ประมาณ) | งาน |
 |---|---|---|
-| 0 POC | 1–2 สัปดาห์ | repo นี้ + ต่อ OPNsense จริง 1 สัปดาห์เพื่อวัด EPS (Q6) + ปรับ regex ให้ตรง log จริง |
+| 0 POC | 1–2 สัปดาห์ | repo นี้ + OPNsense ทดสอบบนเครื่อง x86 ยิง traffic จริงด้วย `traffic-generator` + ต่อ OPNsense จริง 1 สัปดาห์เพื่อวัด EPS (Q6) + ปรับ regex ให้ตรง log จริง |
 | 1 Pilot | 2–4 สัปดาห์ | ซื้อและติดตั้งเครื่อง SIEM ใน Management VLAN (Q7), index set 90 วัน (Q2), Synology WriteOnce (Q10), SMTP บริษัท (Q4), DHCP static mapping + asset CSV (Q5), IDS mode (Q8), backup config OPNsense (Q12), DNS web filtering + บล็อก DoH/DoT (FR-16), SHA-256 manifest (NFR-11), NTP ตาม NFR-02, TLS, RBAC/MFA ตาม Q16, dashboard, logging policy, Acceptable Use Policy (Q13), incident procedure ตาม SLA (Q3), risk treatment (Q14) และ risk acceptance (Q12, Q15) |
 | 2 Expand | 1–2 เดือน | Switch / Wi-Fi AP (Q9), sync DHCP static mapping → asset CSV (Q5), TI feed ภายนอก |
 | 3 Operate | ต่อเนื่อง | review alert รายสัปดาห์, report รายเดือน, tabletop exercise, tune rule |
@@ -359,7 +360,7 @@ RAM: ≤ 50 EPS ใช้ 8 GB รวม (OpenSearch heap 2 GB, Graylog heap 1�
 | Collector | Graylog, ELK, rsyslog ฯลฯ ส่งผ่าน syslog over TLS (6514) **หรือ** แยก Management VLAN | ✅ | Graylog (Q11) บนเครื่องแยกใน Management VLAN (Q7) ผ่านเงื่อนไขนี้แล้ว ส่วน TLS 6514 อยู่ใน NFR-05 เป็นงานเสริม |
 | Retention | Hot ≥ 90 วัน + archive 1–2 ปี · sizing 2–5 MB/user/วัน | ✅ | Q2: 90 วัน + 1 ปี · ตรวจกับสูตรในเอกสาร: 50 คน × 5 MB = 250 MB/วัน ≈ 23 GB/90 วัน ต่ำกว่าค่าที่ประเมินจาก EPS (~300 GB) มาก disk 500 GB จึงเหลือเฟือ ค่าจริงจาก Q6 จะเป็นตัวตัดสิน |
 | Time sync | ทุกอุปกรณ์ sync กับ NTP เดียวกัน เช่น `time.navy.mi.th`, `time.nimt.or.th` | ✅ | ปรับ NFR-02 ให้ระบุ server แล้ว (OPNsense เป็น NTP ภายใน) |
-| Integrity | read-only, **SHA-256 hashing**, แยกสิทธิ์ Log Administrator, auto-archive + backup ภายนอก | ◐ | read-only/immutable ✅ (Q10) · SHA-256 ⬜ เพิ่มเป็น NFR-11 · แยก Log Admin ✅ IT ใช้ role จำกัด + ผู้บริหารถือ admin (Q16) · backup นอก site ➖ ยอมรับความเสี่ยง (Q15) |
+| Integrity | read-only, **SHA-256 hashing**, แยกสิทธิ์ Log Administrator, auto-archive + backup ภายนอก | ◐ | read-only/immutable ✅ (Q10) · SHA-256 ✅ `tools/log_manifest.py` (NFR-11) · แยก Log Admin ✅ IT ใช้ role จำกัด + ผู้บริหารถือ admin (Q16) · backup นอก site ➖ ยอมรับความเสี่ยง (Q15) |
 
 ### 12.2 Web Filtering (A.8.23, A.8.20)
 

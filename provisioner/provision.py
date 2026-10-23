@@ -2,7 +2,8 @@
 """Provision Graylog for the OPNsense SIEM POC via its REST API.
 
 Creates (idempotently, matched by title/name):
-  inputs -> lookup tables -> pipeline rules + pipeline -> streams -> notifications -> alerts
+  retention -> inputs -> lookup tables -> streams -> pipeline rules + pipeline -> notifications
+  -> alerts -> users (RBAC)
 
 Safe to re-run: existing objects are left as they are, except pipeline rules,
 the pipeline and alerts, which are updated so edits in this repo apply.
@@ -23,6 +24,10 @@ LOOKUP_DIR_IN_GRAYLOG = "/usr/share/graylog/data/lookup"
 ALERT_EMAIL_TO = os.getenv("ALERT_EMAIL_TO", "soc-team@example.local")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "http://webhook:8088/alert")
 SYSLOG_PORT = int(os.getenv("SYSLOG_PORT", "1514"))
+LOG_RETENTION_DAYS = int(os.getenv("LOG_RETENTION_DAYS", "90"))      # Q2 / NFR-01
+EVENT_RETENTION_DAYS = int(os.getenv("EVENT_RETENTION_DAYS", "365"))  # alert history = incident evidence
+IT_ANALYST_PASSWORD = os.getenv("IT_ANALYST_PASSWORD", "")
+LOG_ADMIN_PASSWORD = os.getenv("LOG_ADMIN_PASSWORD", "")
 DEFAULT_STREAM = "000000000000000000000001"
 EVENTS_STREAM = "000000000000000000000002"  # "All events"
 
@@ -56,6 +61,32 @@ def wait_for_graylog():
 
 def log(kind, title, created):
     print(f"  {'+ created' if created else '= exists '} {kind}: {title}")
+
+
+# --- retention (index sets) -------------------------------------------------
+
+INDEX_SET_FIELDS = ("id", "title", "description", "writable", "shards", "replicas", "rotation_strategy_class",
+                    "rotation_strategy", "retention_strategy_class", "retention_strategy", "index_analyzer",
+                    "index_optimization_max_num_segments", "index_optimization_disabled",
+                    "field_type_refresh_interval", "field_type_profile", "data_tiering", "use_legacy_rotation")
+
+
+def ensure_retention():
+    """Hot-only data tiering: an index is deleted once all of its data is older than `days` (+5 day slack)."""
+    wanted = {"Default index set": LOG_RETENTION_DAYS, "Events": EVENT_RETENTION_DAYS}
+    for index_set in api("GET", "/api/system/indices/index_sets")["index_sets"]:
+        days = wanted.get(index_set["title"])
+        if days is None:
+            continue
+        lifetime = {"index_lifetime_min": f"P{days}D", "index_lifetime_max": f"P{days + 5}D"}
+        if index_set.get("data_tiering", {}).get("index_lifetime_min") == lifetime["index_lifetime_min"]:
+            print(f"  = exists  retention: {index_set['title']} keeps {days} days")
+            continue
+        body = {k: index_set[k] for k in INDEX_SET_FIELDS if k in index_set}
+        body["data_tiering"] = {"type": "hot_only", **lifetime}
+        body["rotation_strategy"] = {**index_set["rotation_strategy"], **lifetime}
+        api("PUT", f"/api/system/indices/index_sets/{index_set['id']}", body)
+        print(f"  ~ updated  retention: {index_set['title']} keeps {days} days")
 
 
 # --- inputs ---------------------------------------------------------------
@@ -183,6 +214,7 @@ STREAMS = [
     ("OPNsense - dns", "Unbound DNS queries"),
     ("SIEM - Threat intel hits", "Any message that matched a threat-intel IOC"),
     ("SIEM - Web filtering", "Categorised DNS queries and attempts to bypass the DNS filter"),
+    ("SIEM - Log integrity", "Results of the SHA-256 manifest checks on archived logs (tools/log_manifest.py)"),
 ]
 
 
@@ -271,9 +303,9 @@ def alert(title, desc, priority, query, streams, window_min=5, group_by=(), seri
 
 def ensure_alerts(streams, email_id, webhook_id):
     s = streams
-    fw, ids, auth, conf, vpn, ti, web = (s["OPNsense - firewall"], s["OPNsense - ids"], s["OPNsense - auth"],
-                                         s["OPNsense - config"], s["OPNsense - vpn"],
-                                         s["SIEM - Threat intel hits"], s["SIEM - Web filtering"])
+    fw, ids, auth, conf, vpn, ti, web, integrity = (
+        s["OPNsense - firewall"], s["OPNsense - ids"], s["OPNsense - auth"], s["OPNsense - config"],
+        s["OPNsense - vpn"], s["SIEM - Threat intel hits"], s["SIEM - Web filtering"], s["SIEM - Log integrity"])
     definitions = [
         alert("[NET-01] Port scan from single source",
               ">= 15 distinct destination ports blocked from one source within 1 minute.",
@@ -325,6 +357,11 @@ def ensure_alerts(streams, email_id, webhook_id):
         alert("[OPS-01] OPNsense log source silent",
               "No OPNsense logs for 5 minutes - logging failure or tampering (ISO A.8.15 / A.8.16).",
               HIGH, "event_source:opnsense", [DEFAULT_STREAM], 5, (), ("count", None), ("<", 1)),
+        alert("[OPS-02] Log archive integrity check failed",
+              "tools/log_manifest.py verify found a modified or missing archive file - possible log tampering "
+              "(ISO A.8.15 / A.5.28, NFR-11).",
+              HIGH, "event_type:log_manifest_verify AND result:FAIL", [integrity], 5,
+              ["source", "mismatch", "missing"], ("count", None), (">=", 1)),
     ]
     existing = {d["title"]: d for d in api("GET", "/api/events/definitions?per_page=200")["event_definitions"]}
     for d in definitions:
@@ -343,15 +380,59 @@ def ensure_alerts(streams, email_id, webhook_id):
             log("alert", d["title"], True)
 
 
+# --- users / RBAC (Q16) -----------------------------------------------------
+
+USERS = [
+    # username, full name, password, built-in roles, stream access
+    ("it-analyst", "IT Analyst", IT_ANALYST_PASSWORD,
+     ["Reader", "Alerts Manager", "Pipelines Manager", "Dashboard Creator", "Views Manager"], "view"),
+    # break-glass: credentials held by management / ISMS manager, every use is recorded
+    ("log-admin", "Log Administrator (break-glass)", LOG_ADMIN_PASSWORD, ["Admin"], None),
+]
+
+
+def share_with(entity_grn, user_id, capability):
+    """Add one grantee to an entity's shares without dropping the existing ones."""
+    current = api("POST", f"/api/authz/shares/entities/{entity_grn}/prepare", {}).get("selected_grantee_capabilities", {})
+    grantee = f"grn::::user:{user_id}"
+    if current.get(grantee) == capability:
+        return
+    api("POST", f"/api/authz/shares/entities/{entity_grn}", {"selected_grantee_capabilities": {**current, grantee: capability}})
+
+
+def ensure_users():
+    existing = {u["username"]: u for u in api("GET", "/api/users")["users"]}
+    stream_ids = [s["id"] for s in api("GET", "/api/streams")["streams"]]
+    for username, full_name, password, roles, stream_capability in USERS:
+        if username not in existing:
+            if not password:
+                print(f"  ! skipped  user: {username} (set its password in .env to create it)")
+                continue
+            first, _, last = full_name.partition(" ")
+            api("POST", "/api/users", {"username": username, "first_name": first, "last_name": last or "-",
+                                       "email": f"{username}@example.local", "password": password,
+                                       "roles": roles, "permissions": [], "timezone": "Asia/Bangkok",
+                                       "session_timeout_ms": 8 * 3600_000})
+            log("user", f"{username} ({', '.join(roles)})", True)
+        else:
+            log("user", f"{username} ({', '.join(roles)})", False)
+        if stream_capability:
+            user_id = api("GET", f"/api/users/{username}")["id"]
+            for sid in stream_ids:
+                share_with(f"grn::::stream:{sid}", user_id, stream_capability)
+
+
 def main():
     print(f"Provisioning Graylog at {URL}")
     wait_for_graylog()
+    print("retention:");     ensure_retention()
     print("inputs:");        ensure_inputs()
     print("lookup tables:"); ensure_lookups()
     print("streams:");       streams = ensure_streams()
     print("pipeline:");      ensure_pipeline()
     print("notifications:"); email_id, webhook_id = ensure_notifications()
     print("alerts:");        ensure_alerts(streams, email_id, webhook_id)
+    print("users:");         ensure_users()
     print("done.")
 
 

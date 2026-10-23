@@ -1,0 +1,17 @@
+# Run on a Linux machine in the LAN behind the *test* OPNsense (host networking,
+# so DNS and connections leave from that machine's own LAN address):
+#
+#   OPNSENSE_DNS=192.168.1.1 docker compose up -d
+#   OPNSENSE_DNS=192.168.1.1 docker compose run --rm traffic python /app/traffic_generator.py --play all
+services:
+  traffic:
+    image: python:3.12-alpine
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      OPNSENSE_DNS: ${OPNSENSE_DNS:?set OPNSENSE_DNS to the OPNsense LAN address}
+      INTERVAL_SECONDS: ${INTERVAL_SECONDS:-5}
+      SCENARIO_RATE: ${SCENARIO_RATE:-0.1}
+    volumes:
+      - ./:/app:ro
+    command: ["python", "-u", "/app/traffic_generator.py"]

@@ -11,6 +11,7 @@ stage 0 match pass
   rule "opnsense: parse OpenVPN TLS auth error";
   rule "opnsense: parse DHCP lease (ISC dhcpd)";
   rule "opnsense: parse Unbound DNS query";
+  rule "siem tools: parse log manifest result";
 stage 1 match pass
   rule "opnsense: filterlog ports (tcp/udp)";
   rule "enrich: source network zone";
@@ -29,4 +30,5 @@ stage 2 match pass
   rule "route: OPNsense category stream";
   rule "route: threat intel hits";
   rule "route: web filtering";
+  rule "route: log integrity";
 end

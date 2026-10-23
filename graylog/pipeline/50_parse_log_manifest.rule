@@ -1,0 +1,11 @@
+rule "siem tools: parse log manifest result"
+when
+  to_string($message.application_name) == "log-manifest"
+then
+  // tools/log_manifest.py sends: action=verify result=PASS ok=3 mismatch=0 missing=0 unlisted=0
+  let kv = key_value(value: to_string($message.message), delimiters: " ", kv_delimiters: "=");
+  set_fields(kv);
+  set_field("event_source", "siem-tools");
+  set_field("event_category", "integrity");
+  set_field("event_type", concat("log_manifest_", to_string(kv["action"])));
+end

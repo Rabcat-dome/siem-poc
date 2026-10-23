@@ -93,6 +93,11 @@ services:
       GRAYLOG_PASSWORD: ${GRAYLOG_ADMIN_PASSWORD:-admin}
       ALERT_EMAIL_TO: soc-team@example.local
       WEBHOOK_URL: http://webhook:8088/alert
+      LOG_RETENTION_DAYS: ${LOG_RETENTION_DAYS:-90}
+      EVENT_RETENTION_DAYS: ${EVENT_RETENTION_DAYS:-365}
+      # RBAC users (Q16) are only created when their passwords are set in .env
+      IT_ANALYST_PASSWORD: ${IT_ANALYST_PASSWORD:-}
+      LOG_ADMIN_PASSWORD: ${LOG_ADMIN_PASSWORD:-}
     volumes:
       - ./graylog:/graylog:ro
       - ./provisioner:/app:ro
@@ -115,6 +120,25 @@ services:
     volumes:
       - ./generator:/app:ro
     command: ["python", "-u", "/app/opnsense_simulator.py"]
+    logging: *default-logging
+
+  # on-demand tools (not started by "up"):
+  #   docker compose run --rm tools /tools/monthly_report.py --last-days 7 --email-to management@example.local
+  #   docker compose run --rm tools /tools/log_manifest.py verify /archive /manifest --syslog graylog:1514
+  tools:
+    image: python:3.12-alpine
+    profiles: ["tools"]
+    environment:
+      GRAYLOG_URL: http://graylog:9000
+      GRAYLOG_USER: ${REPORT_USER:-admin}
+      GRAYLOG_PASSWORD: ${REPORT_PASSWORD:-admin}
+      SMTP_HOST: mailpit
+      SMTP_PORT: 1025
+      REPORT_DIR: /reports
+    volumes:
+      - ./tools:/tools:ro
+      - ./reports:/reports
+    entrypoint: ["python", "-u"]
     logging: *default-logging
 
   mailpit:

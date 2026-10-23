@@ -327,7 +327,7 @@
           <rect x="652" y="158" width="20" height="12" rx="2" fill="transparent" stroke="rgba(79,93,117,0.50)" stroke-width="0.8"/>
           <text x="662" y="167" fill="#4f5d75" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">DB</text>
           <text x="706" y="184" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">OpenSearch</text>
-          <text x="706" y="198" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">9 streams · index</text>
+          <text x="706" y="198" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">10 streams · index</text>
 
           <!-- Lookup tables (store) -->
           <rect x="436" y="268" width="168" height="56" rx="6" fill="#f5f5f5"/>
@@ -343,7 +343,7 @@
           <rect x="652" y="274" width="28" height="12" rx="2" fill="transparent" stroke="rgba(191,69,32,0.50)" stroke-width="0.8"/>
           <text x="666" y="283" fill="#bf4520" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">RULE</text>
           <text x="706" y="300" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Alert engine</text>
-          <text x="706" y="314" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">13 event defs</text>
+          <text x="706" y="314" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">14 event defs</text>
 
           <!-- Notifications (external) -->
           <rect x="824" y="268" width="140" height="56" rx="6" fill="#f5f5f5"/>
@@ -438,7 +438,7 @@ c2-server · count()=1</pre>
     <!-- ── Alert perspectives ─────────────────────────────────────── -->
     <section>
       <p class="eyebrow">Alert perspectives</p>
-      <h2>Alert ในแต่ละมุมมอง (ทำงานใน POC แล้ว 13 ข้อ)</h2>
+      <h2>Alert ในแต่ละมุมมอง (ทำงานใน POC แล้ว 14 ข้อ)</h2>
       <p class="section-lead">แต่ละมุมมองตอบ control ของ ISO/IEC 27001:2022 ต่างกัน ส่วน threshold เป็นค่าตั้งต้นที่ต้องปรับตามข้อมูลจริงใน Phase 1</p>
       <div class="cards">
         <div class="card">
@@ -481,8 +481,9 @@ c2-server · count()=1</pre>
           <ul>
             <li><span class="sev">LOW</span><code>CHG-01</code> ทุกการแก้ config บอกว่าใคร จาก IP ไหน และแก้หน้าไหน</li>
             <li><span class="sev high">HIGH</span><code>OPS-01</code> OPNsense หยุดส่ง log 5 นาที (เครื่องล่ม, สายหลุด หรือมีคนปิด logging)</li>
+            <li><span class="sev high">HIGH</span><code>OPS-02</code> ตรวจ SHA-256 ของ log archive ไม่ผ่าน (ไฟล์ถูกแก้หรือหาย)</li>
           </ul>
-          <p class="meta">ISO A.8.9 · A.8.32 · A.8.15 · A.8.16</p>
+          <p class="meta">ISO A.8.9 · A.8.32 · A.8.15 · A.8.16 · A.5.28</p>
         </div>
         <div class="card">
           <div class="card-header"><span class="card-dot soft"></span><h3><small>Next phase</small>มุมมองที่ควรเพิ่ม</h3></div>
