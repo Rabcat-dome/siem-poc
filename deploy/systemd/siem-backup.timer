@@ -1,0 +1,11 @@
+[Unit]
+Description=SIEM: back up MongoDB, configuration and OPNsense config.xml
+
+[Timer]
+OnCalendar=*-*-* 03:00:00 Asia/Bangkok
+Persistent=true
+RandomizedDelaySec=60
+Unit=siem-job@backup.service
+
+[Install]
+WantedBy=timers.target

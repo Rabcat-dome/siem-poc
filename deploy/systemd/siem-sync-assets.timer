@@ -1,0 +1,11 @@
+[Unit]
+Description=SIEM: sync assets.csv from OPNsense DHCP static mappings
+
+[Timer]
+OnCalendar=*:0/15
+Persistent=true
+RandomizedDelaySec=60
+Unit=siem-job@sync-assets.service
+
+[Install]
+WantedBy=timers.target

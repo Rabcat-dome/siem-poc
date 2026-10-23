@@ -1,0 +1,11 @@
+[Unit]
+Description=SIEM: RPT-01 monthly report for the previous month
+
+[Timer]
+OnCalendar=*-*-01 07:00:00 Asia/Bangkok
+Persistent=true
+RandomizedDelaySec=60
+Unit=siem-job@monthly-report.service
+
+[Install]
+WantedBy=timers.target

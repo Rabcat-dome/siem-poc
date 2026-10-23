@@ -1,0 +1,15 @@
+[Unit]
+Description=SIEM: restrict sources of Docker-published ports (DOCKER-USER)
+After=docker.service
+Requires=docker.service
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/siem
+ExecStart=/opt/siem/deploy/firewall/siem-docker-user.sh
+ExecStop=/opt/siem/deploy/firewall/siem-docker-user.sh --remove
+
+[Install]
+WantedBy=multi-user.target docker.service

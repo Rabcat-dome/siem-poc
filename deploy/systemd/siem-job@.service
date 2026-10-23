@@ -1,0 +1,9 @@
+[Unit]
+Description=SIEM scheduled job: %i
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/siem
+ExecStart=/opt/siem/deploy/siem-job.sh %i

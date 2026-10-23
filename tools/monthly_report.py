@@ -9,7 +9,8 @@ for the evidence folder). Use a read-only account such as it-analyst.
   python monthly_report.py --month 2026-10
   python monthly_report.py --last-days 7 --email-to management@example.local
 
-Env: GRAYLOG_URL, GRAYLOG_USER, GRAYLOG_PASSWORD, SMTP_HOST, SMTP_PORT, REPORT_FROM
+Env: GRAYLOG_URL, GRAYLOG_USER, GRAYLOG_PASSWORD, GRAYLOG_CA_FILE (HTTPS), SMTP_HOST, SMTP_PORT,
+     SMTP_USER, SMTP_PASSWORD, SMTP_STARTTLS (true|false), REPORT_FROM
 """
 import argparse
 import base64
@@ -17,6 +18,7 @@ import html
 import json
 import os
 import smtplib
+import ssl
 import sys
 import urllib.error
 import urllib.request
@@ -28,6 +30,8 @@ BKK = timezone(timedelta(hours=7))  # Thailand has no DST
 URL = os.getenv("GRAYLOG_URL", "http://localhost:9000").rstrip("/")
 AUTH = base64.b64encode(f"{os.getenv('GRAYLOG_USER', 'admin')}:{os.getenv('GRAYLOG_PASSWORD', 'admin')}".encode()).decode()
 EMPTY = ("(Empty Value)", "-", None)
+# production Graylog is HTTPS with the private CA from tools/gen_tls_certs.sh
+TLS = ssl.create_default_context(cafile=os.environ["GRAYLOG_CA_FILE"]) if os.getenv("GRAYLOG_CA_FILE") else None
 
 
 def api(method, path, body=None):
@@ -36,7 +40,7 @@ def api(method, path, body=None):
                  "Accept": "application/json", "X-Requested-By": "rpt-01"}.items():
         req.add_header(k, v)
     try:
-        with urllib.request.urlopen(req, timeout=60) as r:
+        with urllib.request.urlopen(req, timeout=60, context=TLS) as r:
             return json.loads(r.read() or b"{}")
     except urllib.error.HTTPError as e:
         sys.exit(f"{method} {path} -> {e.code}: {e.read().decode(errors='replace')[:400]}")
@@ -241,6 +245,10 @@ def main():
         msg.set_content(f"รายงาน RPT-01 ช่วง {period.label}: log {total:,} รายการ, alert {n_alerts} ครั้ง ดูไฟล์แนบ")
         msg.add_attachment(page.encode("utf-8"), maintype="text", subtype="html", filename=os.path.basename(path))
         with smtplib.SMTP(os.getenv("SMTP_HOST", "localhost"), int(os.getenv("SMTP_PORT", "25")), timeout=30) as smtp:
+            if os.getenv("SMTP_STARTTLS", "false").lower() == "true":
+                smtp.starttls(context=ssl.create_default_context())
+            if os.getenv("SMTP_USER"):
+                smtp.login(os.environ["SMTP_USER"], os.getenv("SMTP_PASSWORD", ""))
             smtp.send_message(msg)
         print(f"sent to {args.email_to}")
 

@@ -43,6 +43,10 @@ for h in "$@"; do
   esac
   SAN="${SAN:+$SAN,}$kind:$h"
 done
+# names used inside the deployment: provisioner -> https://graylog:9000, healthcheck -> https://localhost:9000
+for h in graylog localhost; do
+  case ",$SAN," in *",DNS:$h,"*) ;; *) SAN="$SAN,DNS:$h" ;; esac
+done
 
 # --- CA (reused when present) ---
 if [ -f "$CA_DIR/ca.key" ] && [ -f "$OUT_DIR/ca.crt" ]; then

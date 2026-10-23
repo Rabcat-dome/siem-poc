@@ -14,6 +14,7 @@ import glob
 import hashlib
 import json
 import os
+import ssl
 import sys
 import time
 import urllib.error
@@ -23,6 +24,8 @@ import uuid
 URL = os.getenv("GRAYLOG_URL", "http://localhost:9000").rstrip("/")
 AUTH = base64.b64encode(f"{os.getenv('GRAYLOG_USER', 'admin')}:{os.getenv('GRAYLOG_PASSWORD', 'admin')}".encode()).decode()
 CONF_DIR = os.getenv("GRAYLOG_CONF_DIR", "/graylog")
+# production serves Graylog over HTTPS with our private CA (docker-compose.prod.yml)
+TLS = ssl.create_default_context(cafile=os.environ["GRAYLOG_CA_FILE"]) if os.getenv("GRAYLOG_CA_FILE") else None
 LOOKUP_DIR_IN_GRAYLOG = "/usr/share/graylog/data/lookup"
 ALERT_EMAIL_TO = os.getenv("ALERT_EMAIL_TO", "soc-team@example.local")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "http://webhook:8088/alert")
@@ -43,7 +46,7 @@ def api(method, path, body=None, ok=(200, 201, 204)):
     req.add_header("Accept", "application/json")
     req.add_header("X-Requested-By", "siem-poc-provisioner")
     try:
-        with urllib.request.urlopen(req, timeout=30) as r:
+        with urllib.request.urlopen(req, timeout=30, context=TLS) as r:
             raw = r.read()
             return json.loads(raw) if raw else {}
     except urllib.error.HTTPError as e:
@@ -256,8 +259,9 @@ Open Graylog: http://localhost:9000/alerts
 
 
 def ensure_notifications():
+    """-> (email id, webhook id or None). An empty WEBHOOK_URL means e-mail only (Q4)."""
     allow = api("GET", "/api/system/urlallowlist")
-    if not any(e["value"] == WEBHOOK_URL for e in allow["entries"]):
+    if WEBHOOK_URL and not any(e["value"] == WEBHOOK_URL for e in allow["entries"]):
         allow["entries"].append({"id": "siem-poc-webhook", "title": "SIEM POC webhook", "type": "literal",
                                  "value": WEBHOOK_URL})
         api("PUT", "/api/system/urlallowlist", allow)
@@ -272,6 +276,8 @@ def ensure_notifications():
                                      "skip_tls_verification": False, "basic_auth": None, "api_key": None,
                                      "api_secret": None},
     }
+    if not WEBHOOK_URL:
+        del wanted["Webhook - chat/ticketing"]
     for title, cfg in wanted.items():
         if title not in existing:
             existing[title] = api("POST", "/api/events/notifications",
@@ -279,7 +285,7 @@ def ensure_notifications():
             log("notification", title, True)
         else:
             log("notification", title, False)
-    return existing["Email - SOC team"], existing["Webhook - chat/ticketing"]
+    return existing["Email - SOC team"], existing.get("Webhook - chat/ticketing") if WEBHOOK_URL else None
 
 
 # --- alerts (event definitions) --------------------------------------------
@@ -369,7 +375,7 @@ def ensure_alerts(streams, email_id, webhook_id):
     existing = {d["title"]: d for d in api("GET", "/api/events/definitions?per_page=200")["event_definitions"]}
     for d in definitions:
         notify = [{"notification_id": email_id}]
-        if d["priority"] >= HIGH:
+        if d["priority"] >= HIGH and webhook_id:
             notify.append({"notification_id": webhook_id})
         d.update({"alert": True, "field_spec": {}, "key_spec": [],
                   "notifications": notify,

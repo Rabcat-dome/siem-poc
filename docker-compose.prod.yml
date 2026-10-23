@@ -1,0 +1,160 @@
+# Production SIEM stack: graylog + opensearch + mongodb only (no simulator, mailpit or webhook).
+#
+#   cp .env.example .env                      # fill the "Production" section
+#   sh tools/gen_tls_certs.sh siem.example.local 192.168.99.20
+#   python3 tools/preflight_check.py --env .env --tls-dir tls --prod
+#   docker compose -f docker-compose.prod.yml up -d
+#   sudo deploy/install.sh                    # host firewall, scheduled jobs, backups
+#
+# Ports are bound to SIEM_HOST_IP only. Docker-published ports bypass UFW/firewalld INPUT
+# rules, so their allowed sources are enforced by deploy/firewall/siem-docker-user.sh.
+
+name: siem
+
+x-logging: &default-logging
+  driver: json-file
+  options: { max-size: "50m", max-file: "5" }
+
+networks:
+  siem:
+    driver: bridge
+    ipam:
+      # pinned so Docker never picks a range that collides with the office VLANs
+      config:
+        - subnet: ${DOCKER_SUBNET:-172.30.10.0/24}
+
+services:
+  mongodb:
+    image: mongo:7.0
+    restart: unless-stopped
+    networks: [siem]
+    volumes:
+      - mongodb_data:/data/db
+    logging: *default-logging
+
+  opensearch:
+    image: opensearchproject/opensearch:2.19.5
+    restart: unless-stopped
+    networks: [siem]
+    environment:
+      - OPENSEARCH_JAVA_OPTS=-Xms${OPENSEARCH_HEAP:-2g} -Xmx${OPENSEARCH_HEAP:-2g}
+      - discovery.type=single-node
+      - action.auto_create_index=false
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+      - DISABLE_SECURITY_PLUGIN=true   # no published port: reachable only on the private siem network
+    ulimits:
+      memlock: { soft: -1, hard: -1 }
+      nofile: { soft: 65536, hard: 65536 }
+    volumes:
+      - opensearch_data:/usr/share/opensearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      retries: 30
+    logging: *default-logging
+
+  # builds a Java truststore (JDK defaults + our CA) so Graylog trusts its own HTTPS endpoint
+  truststore:
+    image: graylog/graylog:7.1.11
+    networks: [siem]
+    user: root
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >
+        cp /opt/java/openjdk/lib/security/cacerts /truststore/cacerts &&
+        /opt/java/openjdk/bin/keytool -importcert -noprompt -alias siem-ca
+        -file /tls/ca.crt -keystore /truststore/cacerts -storepass changeit &&
+        chmod 644 /truststore/cacerts
+    volumes:
+      - ./tls:/tls:ro
+      - graylog_truststore:/truststore
+    restart: "no"
+    logging: *default-logging
+
+  graylog:
+    image: graylog/graylog:7.1.11
+    restart: unless-stopped
+    networks: [siem]
+    depends_on:
+      mongodb: { condition: service_started }
+      opensearch: { condition: service_healthy }
+      truststore: { condition: service_completed_successfully }
+    entrypoint: /usr/bin/tini -- /docker-entrypoint.sh
+    environment:
+      GRAYLOG_NODE_ID_FILE: /usr/share/graylog/data/data/node-id
+      GRAYLOG_HTTP_BIND_ADDRESS: 0.0.0.0:9000
+      GRAYLOG_HTTP_EXTERNAL_URI: https://${SIEM_FQDN:?set SIEM_FQDN in .env}:9000/
+      GRAYLOG_HTTP_PUBLISH_URI: https://graylog:9000/
+      GRAYLOG_HTTP_ENABLE_TLS: "true"
+      GRAYLOG_HTTP_TLS_CERT_FILE: /usr/share/graylog/data/tls/server.crt
+      GRAYLOG_HTTP_TLS_KEY_FILE: /usr/share/graylog/data/tls/server.key
+      GRAYLOG_ELASTICSEARCH_HOSTS: http://opensearch:9200
+      GRAYLOG_MONGODB_URI: mongodb://mongodb:27017/graylog
+      GRAYLOG_PASSWORD_SECRET: ${GRAYLOG_PASSWORD_SECRET:?set in .env}
+      GRAYLOG_ROOT_PASSWORD_SHA2: ${GRAYLOG_ROOT_PASSWORD_SHA2:?set in .env}
+      GRAYLOG_ROOT_TIMEZONE: Asia/Bangkok
+      GRAYLOG_SERVER_JAVA_OPTS: >-
+        -Xms${GRAYLOG_HEAP:-1g} -Xmx${GRAYLOG_HEAP:-1g} -XX:NewRatio=1 -server -XX:+ResizeTLAB
+        -XX:-OmitStackTraceInFastThrow -Djavax.net.ssl.trustStore=/usr/share/graylog/data/truststore/cacerts
+        -Djavax.net.ssl.trustStorePassword=changeit
+      GRAYLOG_MESSAGE_JOURNAL_MAX_SIZE: 5gb
+      # alert e-mail through the company relay (Q4: e-mail only)
+      GRAYLOG_TRANSPORT_EMAIL_ENABLED: "true"
+      GRAYLOG_TRANSPORT_EMAIL_HOSTNAME: ${SMTP_HOST:?set SMTP_HOST in .env}
+      GRAYLOG_TRANSPORT_EMAIL_PORT: ${SMTP_PORT:-587}
+      GRAYLOG_TRANSPORT_EMAIL_USE_AUTH: ${SMTP_USE_AUTH:-true}
+      GRAYLOG_TRANSPORT_EMAIL_AUTH_USERNAME: ${SMTP_USER:-}
+      GRAYLOG_TRANSPORT_EMAIL_AUTH_PASSWORD: ${SMTP_PASSWORD:-}
+      GRAYLOG_TRANSPORT_EMAIL_USE_TLS: ${SMTP_STARTTLS:-true}
+      GRAYLOG_TRANSPORT_EMAIL_USE_SSL: "false"
+      GRAYLOG_TRANSPORT_EMAIL_FROM_EMAIL: ${ALERT_FROM:?set ALERT_FROM in .env}
+      GRAYLOG_TRANSPORT_EMAIL_WEB_INTERFACE_URL: https://${SIEM_FQDN}:9000
+    ports:
+      - "${SIEM_HOST_IP:?set SIEM_HOST_IP in .env}:${SYSLOG_HOST_PORT:-514}:1514/udp"
+      - "${SIEM_HOST_IP}:${SYSLOG_HOST_PORT:-514}:1514/tcp"
+      - "${SIEM_HOST_IP}:${SYSLOG_TLS_HOST_PORT:-6514}:6514/tcp"
+      - "${SIEM_HOST_IP}:9000:9000/tcp"
+    volumes:
+      - graylog_data:/usr/share/graylog/data/data
+      - graylog_journal:/usr/share/graylog/data/journal
+      - graylog_truststore:/usr/share/graylog/data/truststore:ro
+      - ./graylog/lookup:/usr/share/graylog/data/lookup:ro
+      - ./tls:/usr/share/graylog/data/tls:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs --cacert /usr/share/graylog/data/tls/ca.crt https://localhost:9000/api/system/lbstatus | grep -q ALIVE"]
+      interval: 10s
+      start_period: 90s
+      retries: 30
+    logging: *default-logging
+
+  # one-shot: same provisioner as the POC, over HTTPS, without the webhook (WEBHOOK_URL empty)
+  provisioner:
+    image: python:3.12-alpine
+    networks: [siem]
+    depends_on:
+      graylog: { condition: service_healthy }
+    environment:
+      GRAYLOG_URL: https://graylog:9000
+      GRAYLOG_CA_FILE: /tls/ca.crt
+      GRAYLOG_USER: admin
+      GRAYLOG_PASSWORD: ${GRAYLOG_ADMIN_PASSWORD:?set in .env}
+      ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:?set in .env}
+      WEBHOOK_URL: ${WEBHOOK_URL:-}
+      LOG_RETENTION_DAYS: ${LOG_RETENTION_DAYS:-90}
+      EVENT_RETENTION_DAYS: ${EVENT_RETENTION_DAYS:-365}
+      IT_ANALYST_PASSWORD: ${IT_ANALYST_PASSWORD:-}
+      LOG_ADMIN_PASSWORD: ${LOG_ADMIN_PASSWORD:-}
+    volumes:
+      - ./graylog:/graylog:ro
+      - ./provisioner:/app:ro
+      - ./tls:/tls:ro
+    command: ["python", "-u", "/app/provision.py"]
+    restart: "no"
+    logging: *default-logging
+
+volumes:
+  mongodb_data:
+  opensearch_data:
+  graylog_data:
+  graylog_journal:
+  graylog_truststore:

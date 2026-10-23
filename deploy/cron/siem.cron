@@ -1,0 +1,12 @@
+# /etc/cron.d/siem - alternative to the systemd timers in deploy/systemd/ (use one or the other).
+# Times are host local time: set it with  timedatectl set-timezone Asia/Bangkok
+# flock keeps a slow run from overlapping the next one.
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+*/15 * * * * root flock -n /run/lock/siem-sync-assets     /opt/siem/deploy/siem-job.sh sync-assets     >> /var/log/siem-jobs.log 2>&1
+30 2 * * *   root flock -n /run/lock/siem-sync-web        /opt/siem/deploy/siem-job.sh sync-web        >> /var/log/siem-jobs.log 2>&1
+30 1 * * *   root flock -n /run/lock/siem-manifest-create /opt/siem/deploy/siem-job.sh manifest-create >> /var/log/siem-jobs.log 2>&1
+0 2 1 * *    root flock -n /run/lock/siem-manifest-verify /opt/siem/deploy/siem-job.sh manifest-verify >> /var/log/siem-jobs.log 2>&1
+0 7 1 * *    root flock -n /run/lock/siem-monthly-report  /opt/siem/deploy/siem-job.sh monthly-report  >> /var/log/siem-jobs.log 2>&1
+0 3 * * *    root flock -n /run/lock/siem-backup          /opt/siem/deploy/siem-job.sh backup          >> /var/log/siem-jobs.log 2>&1

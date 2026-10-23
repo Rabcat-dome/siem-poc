@@ -1,0 +1,11 @@
+[Unit]
+Description=SIEM: rebuild web_categories.csv
+
+[Timer]
+OnCalendar=*-*-* 02:30:00 Asia/Bangkok
+Persistent=true
+RandomizedDelaySec=60
+Unit=siem-job@sync-web.service
+
+[Install]
+WantedBy=timers.target

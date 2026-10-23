@@ -4,6 +4,7 @@ POC สำหรับเตรียมตรวจ ISO/IEC 27001:2022 โด�
 
 - Requirement (ภาษาไทย, ใช้คุยร่วมกัน): [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md)
 - Diagram (architecture, log journey, alert perspectives, integration points): [docs/architecture.html](docs/architecture.html) เปิดใน browser
+- Network architecture และคู่มือติดตั้ง OPNsense ในออฟฟิศ (เอกสารส่งมอบ): [docs/NETWORK-ARCHITECTURE.md](docs/NETWORK-ARCHITECTURE.md)
 
 ```mermaid
 flowchart LR
@@ -216,10 +217,79 @@ cert อยู่ใน `tls/` ส่วน key ของ CA อยู่ใน 
 python3 tools/preflight_check.py --env .env --tls-dir tls
 ```
 
+## Deploy production
+
+production ใช้ [docker-compose.prod.yml](docker-compose.prod.yml) ซึ่งต่างจาก POC ดังนี้
+
+| | POC (`docker-compose.yml`) | Production (`docker-compose.prod.yml`) |
+|---|---|---|
+| Service | graylog, opensearch, mongodb + simulator, mailpit, webhook | graylog, opensearch, mongodb เท่านั้น |
+| Web UI | HTTP, `127.0.0.1:9000` | **HTTPS** ด้วย cert ชุดเดียวกับ syslog TLS, bind `SIEM_HOST_IP:9000` |
+| Syslog | 1514 | 514 (UDP/TCP) และ 6514 (TLS) bind `SIEM_HOST_IP` |
+| Alert | Email (Mailpit) + Webhook | Email ผ่าน SMTP relay ของบริษัทเท่านั้น (Q4) |
+| Docker network | subnet อัตโนมัติ | fix ไว้ที่ `DOCKER_SUBNET` (ค่าตั้งต้น 172.30.10.0/24) ไม่ให้ชน VLAN |
+| Secret | มีค่าตั้งต้น | ไม่มีค่าตั้งต้น ถ้าไม่ได้ตั้งใน `.env` จะสั่ง up ไม่ได้ |
+
+**เตรียมเครื่อง** (Ubuntu 22.04/24.04 + Docker Engine และ compose plugin, spec ตาม Q7)
+- ตั้ง IP ใน Management VLAN, `timedatectl set-timezone Asia/Bangkok` และให้ NTP ชี้ไปที่ OPNsense
+- mount share ของ Synology: folder archive (อ่านอย่างเดียว), folder manifest และ folder backup (เขียนได้) แล้วใส่ path ใน `.env`
+- ให้ OPNsense มี host override ของ `SIEM_FQDN` ใน Unbound เพื่อให้ admin เปิด `https://<SIEM_FQDN>:9000` ได้
+
+**ติดตั้ง**
+
+```bash
+sudo git clone https://github.com/Rabcat-dome/siem-poc.git /opt/siem && cd /opt/siem
+cp .env.example .env && chmod 600 .env        # กรอกส่วน Production และ secret ทั้งหมด
+sh tools/gen_tls_certs.sh siem.example.local 192.168.99.20
+python3 tools/preflight_check.py --env .env --tls-dir tls --prod
+docker compose -f docker-compose.prod.yml up -d
+sudo deploy/install.sh
+```
+
+ย้าย `tls-ca/` (key ของ CA) ไปเก็บนอกเครื่องหลังสร้าง cert เสร็จ และตั้ง `REPORT_USER=it-analyst` เมื่อมี user นี้แล้ว
+
+**สิ่งที่ `deploy/install.sh` ติดตั้ง** (ถ้าไม่ใช้ systemd ให้ใช้ [deploy/cron/siem.cron](deploy/cron/siem.cron) แทน)
+
+| Unit | เวลา (เวลาไทย) | ทำอะไร |
+|---|---|---|
+| `siem-firewall.service` | ทุกครั้งที่ Docker start | [rule ใน DOCKER-USER](deploy/firewall/siem-docker-user.sh): syslog รับจาก `OPNSENSE_SYSLOG_IP` เท่านั้น, UI รับจาก `SIEM_ADMIN_NETS` เท่านั้น |
+| `siem-sync-assets.timer` | ทุก 15 นาที | `assets.csv` จาก DHCP static mapping |
+| `siem-sync-web.timer` | ทุกวัน 02:30 | `web_categories.csv` |
+| `siem-manifest-create.timer` | ทุกวัน 01:30 | SHA-256 ของไฟล์ archive ใหม่ |
+| `siem-manifest-verify.timer` | วันที่ 1 เวลา 02:00 | ตรวจ archive ทั้งหมด (ไม่ผ่านจะเกิด OPS-02) |
+| `siem-monthly-report.timer` | วันที่ 1 เวลา 07:00 | RPT-01 ของเดือนก่อนทาง email |
+| `siem-backup.timer` | ทุกวัน 03:00 | [backup](deploy/backup.sh): MongoDB, config (เข้ารหัสด้วย `BACKUP_PASSPHRASE`), `config.xml` ของ OPNsense |
+
+รัน job เองได้ด้วย `deploy/siem-job.sh <ชื่อ job>` และดู log ด้วย `journalctl -u 'siem-job@*'`
+
+**กู้คืนจาก backup** (แต่ละชุดอยู่ใน `BACKUP_DIR/<วันเวลา>/` และตรวจไฟล์ด้วย `sha256sum -c SHA256SUMS`)
+
+```bash
+openssl enc -d -aes-256-cbc -pbkdf2 -in siem-config.tar.gz.enc | tar -xzf - -C /opt/siem
+docker compose -f docker-compose.prod.yml up -d mongodb
+docker compose -f docker-compose.prod.yml exec -T mongodb mongorestore --archive --gzip --drop < graylog-mongodb.archive.gz
+docker compose -f docker-compose.prod.yml up -d
+```
+
+ส่วน `opnsense-config.xml` ให้ restore ที่ OPNsense › System › Configuration › Backups
+
+**ทดสอบแล้วบนเครื่อง POC (Mac):**
+- production stack ขึ้นด้วย HTTPS, provisioner ทำงานผ่าน CA และไม่สร้าง webhook
+- syslog 514 และ 6514 ถูก parse ครบ, alert ส่งผ่าน SMTP ถึง
+- job manifest, report และ backup ทำงาน และ restore MongoDB ลงฐานข้อมูลเปล่าได้ครบ
+- script firewall ทดสอบใน Linux container และ systemd unit ผ่าน `systemd-analyze verify`
+
+**ยังต้องยืนยันบน Linux host จริง:**
+- rule ใน `DOCKER-USER` กรอง packet ได้จริง
+- `gl2_remote_ip` เป็น IP ของ OPNsense (บน Mac เป็น gateway ของ Docker เพราะ Docker Desktop ทำ NAT อีกชั้น)
+- endpoint backup ของ OPNsense (`/api/core/backup/download/this`) และสิทธิ์ของ API key
+
 ## โครงสร้าง repo
 
 ```text
-docker-compose.yml            # mongodb, opensearch, graylog, provisioner, generator, mailpit, webhook, tools
+docker-compose.yml            # POC: mongodb, opensearch, graylog, provisioner, generator, mailpit, webhook, tools
+docker-compose.prod.yml       # production: graylog (HTTPS), opensearch, mongodb, provisioner
+deploy/                       # host firewall (DOCKER-USER), job runner, systemd timers / cron, backup, install.sh
 generator/opnsense_simulator.py  # ยิง log แบบ OPNsense ทุก 5 วินาที + attack scenarios
 graylog/pipeline/*.rule       # parse (stage 0) → enrich (stage 1) → route (stage 2)
 graylog/pipeline/opnsense.pipeline
@@ -271,7 +341,7 @@ High ส่งทั้ง Email และ Webhook ส่วน Medium/Low ส�
 ## ข้อจำกัดของ POC (ห้ามใช้เป็น production ตามนี้)
 
 - รหัสผ่าน `admin/admin` และ `GRAYLOG_PASSWORD_SECRET` เป็นค่าตั้งต้น ถ้าจะใช้จริงให้ตั้งใน `.env` (ดู `.env.example`) และเก็บรหัส root ไว้เป็น break-glass เหมือน `log-admin`
-- OpenSearch ปิด security plugin (ไม่ได้เปิด port ออกนอก docker network) และ UI ยังเป็น HTTP ส่วน syslog เข้ารหัสได้ผ่าน TLS 6514 เมื่อสร้าง cert แล้ว
+- OpenSearch ปิด security plugin (ไม่ได้เปิด port ออกนอก docker network) และ UI ของ POC เป็น HTTP (production เป็น HTTPS ดูหัวข้อ "Deploy production")
 - Identity (IP → ผู้ใช้) มาจาก CSV ซึ่ง sync จาก DHCP static mapping ได้ แต่ยังไม่ได้ทดสอบกับ OPNsense จริง
 - filterlog IPv6 และ DHCP แบบ dnsmasq ทดสอบผ่าน simulator API เท่านั้น ยังไม่เคยเจอ traffic จริง
 

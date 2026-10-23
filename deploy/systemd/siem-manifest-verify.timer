@@ -1,0 +1,11 @@
+[Unit]
+Description=SIEM: verify archived logs against their SHA-256 manifests
+
+[Timer]
+OnCalendar=*-*-01 02:00:00 Asia/Bangkok
+Persistent=true
+RandomizedDelaySec=60
+Unit=siem-job@manifest-verify.service
+
+[Install]
+WantedBy=timers.target

@@ -6,6 +6,7 @@
 | วันที่ | 2026-10-23 |
 | POC | `docker compose up -d` ใน repo นี้ (ดู [README](../README.md)) |
 | Diagram | [docs/architecture.html](architecture.html) |
+| Network architecture | [docs/NETWORK-ARCHITECTURE.md](NETWORK-ARCHITECTURE.md) |
 | อ้างอิง | `Document_Summary_ISO27001_WebFiltering_Syslog.xlsx` (tab Web Filtering Guide, Syslog & Log Management) |
 
 ---
@@ -107,9 +108,9 @@ ISMS scope ครอบคลุม**ทั้งบริษัท สำนั
 | NFR-02 | **Time sync** | OPNsense sync จาก `time.nimt.or.th` และ `time.navy.mi.th` แล้วเป็น NTP server ภายในให้ทุกอุปกรณ์ (SIEM host, NAS, switch/AP, PC) เก็บ timestamp แบบ UTC และแสดงผลเป็น Asia/Bangkok | A.8.17 |
 | NFR-03 | **Integrity** | Admin ของ firewall ลบหรือแก้ log ใน SIEM ไม่ได้ (แยกหน้าที่) และ archive บน Synology เป็น WriteOnce/immutable ล็อก 1 ปี (Q10) | A.8.15, A.5.3 |
 | NFR-04 | **Access control** | RBAC ตาม Q16 (IT ดูและแก้ rule ได้แต่ลบ log ไม่ได้, admin เป็น break-glass ของผู้บริหาร), บัญชีรายบุคคล, MFA สำหรับ SIEM UI และ review สิทธิ์ทุกไตรมาส · POC ✅ user `it-analyst` / `log-admin` (ทดสอบแล้วว่าลบ log ไม่ได้) | A.5.15, A.8.2, A.8.5, A.5.3 |
-| NFR-05 | **Confidentiality in transit** | Syslog over TLS และ HTTPS สำหรับ UI · POC ✅ input TLS 6514 + `tools/gen_tls_certs.sh` (ทดสอบ TLS 1.3 แล้ว), UI ยังเป็น HTTP | A.8.20, A.8.24 |
+| NFR-05 | **Confidentiality in transit** | Syslog over TLS และ HTTPS สำหรับ UI · POC ✅ input TLS 6514 + `tools/gen_tls_certs.sh` (ทดสอบ TLS 1.3 แล้ว), UI ยังเป็น HTTP · production ✅ UI เป็น HTTPS (`docker-compose.prod.yml`) | A.8.20, A.8.24 |
 | NFR-06 | **Capacity** | ✅ (Q6) < 50 คน ≈ ≤ 50 EPS: 4 vCPU / RAM 8 GB / disk 500 GB รองรับ EPS × 2 (ยืนยันด้วยค่าจริงใน Phase 0) | A.8.6 |
-| NFR-07 | **Backup** | Backup config ของ SIEM (MongoDB) และ pipeline/alert ในรูปแบบ code (repo นี้) | A.8.13 |
+| NFR-07 | **Backup** | Backup config ของ SIEM (MongoDB) และ pipeline/alert ในรูปแบบ code (repo นี้) · ✅ `deploy/backup.sh` ทุกคืน (MongoDB, config เข้ารหัส, config.xml ของ OPNsense) ทดสอบ restore แล้ว | A.8.13 |
 | NFR-08 | **PDPA** | log มีข้อมูลส่วนบุคคล (IP, username) จึงต้องระบุวัตถุประสงค์ จำกัดสิทธิ์เข้าถึง และกำหนดระยะเวลาเก็บ | A.5.34 |
 | NFR-09 | **Alert latency** | Alert ถึงผู้รับภายใน 2 นาทีหลังเกิดเหตุ | A.8.16 |
 | NFR-10 | **Response SLA** | ✅ (Q3) IT in-house รับ alert, High: เริ่มตรวจสอบภายใน 1 ชม. ในเวลาทำการ / ภายใน 2 ชม. แรกของวันทำการถัดไปถ้าเกิดนอกเวลา (นอกเวลาเป็น best effort) | A.5.24, A.5.26 |

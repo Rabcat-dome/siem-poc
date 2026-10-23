@@ -1,0 +1,11 @@
+[Unit]
+Description=SIEM: SHA-256 manifest of new archive files
+
+[Timer]
+OnCalendar=*-*-* 01:30:00 Asia/Bangkok
+Persistent=true
+RandomizedDelaySec=60
+Unit=siem-job@manifest-create.service
+
+[Install]
+WantedBy=timers.target

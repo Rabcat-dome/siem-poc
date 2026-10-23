@@ -123,7 +123,7 @@ def valid_port(v):
     return v.isdigit() and 1 <= int(v) <= 65535
 
 
-def check_ports(env):
+def check_ports(env, prod=False):
     syslog = env.get("SYSLOG_HOST_PORT", "1514")
     tls = env.get("SYSLOG_TLS_HOST_PORT", "6514")
     for name, v in (("SYSLOG_HOST_PORT", syslog), ("SYSLOG_TLS_HOST_PORT", tls)):
@@ -142,6 +142,8 @@ def check_ports(env):
     if valid_port(syslog) and syslog == tls:
         report("FAIL", "SYSLOG_HOST_PORT and SYSLOG_TLS_HOST_PORT are the same")
 
+    if prod:  # docker-compose.prod.yml binds the UI to SIEM_HOST_IP, checked in check_prod()
+        return
     ui = env.get("GRAYLOG_UI_BIND", "127.0.0.1:9000")
     host = ui.rsplit(":", 1)[0] if ":" in ui else ""
     if not host or host in ("0.0.0.0", "::", "[::]", "*"):
@@ -152,11 +154,57 @@ def check_ports(env):
         report("PASS", f"web UI bound to {ui}")
 
 
+PROD_REQUIRED = ("SIEM_FQDN", "SIEM_HOST_IP", "SIEM_EXT_IF", "OPNSENSE_SYSLOG_IP", "SIEM_ADMIN_NETS",
+                 "SMTP_HOST", "ALERT_FROM", "ALERT_EMAIL_TO", "REPORT_EMAIL_TO", "BACKUP_DIR")
+
+
+def cert_names(path):
+    """subjectAltName entries of a PEM certificate, e.g. {'DNS:graylog', 'IP Address:192.168.99.20'}."""
+    try:
+        out = subprocess.run(["openssl", "x509", "-in", path, "-noout", "-text"],
+                             capture_output=True, text=True, check=True).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    names, grab = set(), False
+    for line in out.splitlines():
+        if "Subject Alternative Name" in line:
+            grab = True
+            continue
+        if grab:
+            names = {n.strip() for n in line.split(",")}
+            break
+    return names
+
+
+def check_prod(env, tls_dir):
+    """docker-compose.prod.yml, deploy/ firewall, jobs and backup."""
+    for name in PROD_REQUIRED:
+        if not env.get(name):
+            report("FAIL", f"{name} is empty (required by docker-compose.prod.yml / deploy/)")
+    ip = env.get("SIEM_HOST_IP", "")
+    if ip in ("0.0.0.0", "127.0.0.1", "::", "::1"):
+        report("FAIL", f"SIEM_HOST_IP={ip} must be the host's Management VLAN address")
+    names = cert_names(os.path.join(tls_dir, "server.crt"))
+    if names is not None:
+        for want in (f"IP Address:{ip}" if ip else None, f"DNS:{env.get('SIEM_FQDN', '')}", "DNS:graylog"):
+            if want and not want.endswith(":") and want not in names:
+                report("FAIL", f"server certificate has no {want}: re-run tools/gen_tls_certs.sh with it")
+    if not env.get("BACKUP_PASSPHRASE"):
+        report("WARN", "BACKUP_PASSPHRASE is empty: config backups (with .env secrets and the TLS key) stay unencrypted")
+    if not env.get("OPNSENSE_URL"):
+        report("WARN", "OPNSENSE_URL is empty: sync-assets and the OPNsense config backup will not run")
+    if not (env.get("ARCHIVE_DIR") and env.get("MANIFEST_DIR")):
+        report("WARN", "ARCHIVE_DIR / MANIFEST_DIR not set: the SHA-256 manifest jobs will fail")
+    if env.get("WEBHOOK_URL"):
+        report("WARN", "WEBHOOK_URL is set although Q4 decided e-mail only")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
     ap.add_argument("--env", default=os.path.join(root, ".env"), help="path to the .env file (default: repo .env)")
     ap.add_argument("--tls-dir", default=os.path.join(root, "tls"), help="directory with server.crt / server.key")
+    ap.add_argument("--prod", action="store_true", help="also check the docker-compose.prod.yml / deploy/ settings")
     args = ap.parse_args()
     if not os.path.isfile(args.env):
         print(f"FAIL  {args.env} not found (copy .env.example to .env first)")
@@ -165,7 +213,9 @@ def main():
     print(f"preflight: {os.path.abspath(args.env)}")
     check_secrets(env)
     check_tls(args.tls_dir)
-    check_ports(env)
+    check_ports(env, prod=args.prod)
+    if args.prod:
+        check_prod(env, args.tls_dir)
     fails, warns = results.count("FAIL"), results.count("WARN")
     print(f"\n{results.count('PASS')} pass, {warns} warn, {fails} fail")
     return 1 if fails else 0
