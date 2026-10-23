@@ -7,7 +7,6 @@
 | POC | `docker compose up -d` ใน repo นี้ (ดู [README](../README.md)) |
 | Diagram | [docs/architecture.html](architecture.html) |
 | อ้างอิง | `Document_Summary_ISO27001_WebFiltering_Syslog.xlsx` (tab Web Filtering Guide, Syslog & Log Management) |
-| เอกสาร ISMS | [Logging policy, AUP, Incident procedure, Risk acceptance (Draft v0.1)](https://claude.ai/artifact/LU8dKuJ1aR4m8xxQbJbvXU) |
 
 ---
 
@@ -341,7 +340,7 @@ RAM: ≤ 50 EPS ใช้ 8 GB รวม (OpenSearch heap 2 GB, Graylog heap 1�
 | Phase | ระยะเวลา (ประมาณ) | งาน |
 |---|---|---|
 | 0 POC | 1–2 สัปดาห์ | repo นี้ + OPNsense ทดสอบบนเครื่อง x86 ยิง traffic จริงด้วย `traffic-generator` + ต่อ OPNsense จริง 1 สัปดาห์เพื่อวัด EPS (Q6) + ปรับ regex ให้ตรง log จริง |
-| 1 Pilot | 2–4 สัปดาห์ | ซื้อและติดตั้งเครื่อง SIEM ใน Management VLAN (Q7), index set 90 วัน (Q2), Synology WriteOnce (Q10), SMTP บริษัท (Q4), DHCP static mapping + asset CSV (Q5), IDS mode (Q8), backup config OPNsense (Q12), DNS web filtering + บล็อก DoH/DoT (FR-16), SHA-256 manifest (NFR-11), NTP ตาม NFR-02, TLS, RBAC/MFA ตาม Q16, dashboard, logging policy, Acceptable Use Policy (Q13), incident procedure ตาม SLA (Q3), risk treatment (Q14) และ risk acceptance (Q12, Q15) |
+| 1 Pilot | 2–4 สัปดาห์ | ซื้อและติดตั้งเครื่อง SIEM ใน Management VLAN (Q7), index set 90 วัน (Q2), Synology WriteOnce (Q10), SMTP บริษัท (Q4), DHCP static mapping + asset CSV (Q5), IDS mode (Q8), backup config OPNsense (Q12), DNS web filtering + บล็อก DoH/DoT (FR-16), SHA-256 manifest (NFR-11), NTP ตาม NFR-02, TLS, RBAC/MFA ตาม Q16 และ dashboard |
 | 2 Expand | 1–2 เดือน | Switch / Wi-Fi AP (Q9), sync DHCP static mapping → asset CSV (Q5), TI feed ภายนอก |
 | 3 Operate | ต่อเนื่อง | review alert รายสัปดาห์, report รายเดือน, tabletop exercise, tune rule |
 
