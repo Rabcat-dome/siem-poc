@@ -128,6 +128,13 @@ LOOKUPS = [
     ("asset-owner", "assets.csv", "ip", "owner", False, None),
     ("asset-department", "assets.csv", "ip", "department", False, None),
     ("asset-criticality", "assets.csv", "ip", "criticality", False, None),
+    # the same inventory keyed by MAC, for Wi-Fi / switch events that carry no IP (NET-03). A separate file
+    # because the CSV adapter fails on duplicate keys, and every asset without a MAC would have the key ""
+    ("asset-mac-hostname", "assets_mac.csv", "mac", "hostname", False, None),
+    ("asset-mac-owner", "assets_mac.csv", "mac", "owner", False, None),
+    ("asset-mac-department", "assets_mac.csv", "mac", "department", False, None),
+    ("wifi-ssid", "wifi_ssids.csv", "iface", "ssid", False, None),
+    ("wifi-zone", "wifi_ssids.csv", "iface", "zone", False, None),
     ("network-zones", "network_zones.csv", "cidr", "zone", True, "Internet"),
     ("fw-rules", "fw_rules.csv", "rid", "description", False, None),
     ("fw-rule-tag", "fw_rules.csv", "rid", "tag", False, None),
@@ -217,11 +224,18 @@ STREAMS = [
     ("OPNsense - config", "Firewall configuration changes (change audit)"),
     ("OPNsense - vpn", "OpenVPN logins and sessions"),
     ("OPNsense - dhcp", "DHCP leases (IP -> MAC -> hostname)"),
-    ("OPNsense - dns", "Unbound DNS queries"),
+    ("OPNsense - dns", "Unbound DNS queries and blocklist hits"),
+    ("Network - switch", "Managed switch: port up/down, port security, admin logins, config changes (Q9)"),
+    ("Network - wifi", "Wi-Fi AP: client connect/disconnect per SSID, wrong passwords, admin logins (Q9)"),
     ("SIEM - Threat intel hits", "Any message that matched a threat-intel IOC"),
-    ("SIEM - Web filtering", "Categorised DNS queries and attempts to bypass the DNS filter"),
+    ("SIEM - Web filtering", "Categorised DNS queries, blocklist hits and attempts to bypass the DNS filter"),
     ("SIEM - Log integrity", "Results of the SHA-256 manifest checks on archived logs (tools/log_manifest.py)"),
+    ("SIEM - Capacity", "Disk usage of the SIEM host (tools/disk_check.py, OPS-03)"),
 ]
+
+# DNS queries that Unbound answered from a blocklist (19b_parse_dns_blocked.rule). If the real OPNsense
+# turns out not to log blocked answers, use "web_policy:block" (category lookup on every query) instead.
+DNS_BLOCKED = "event_type:dns_blocked"
 
 
 def ensure_streams():
@@ -312,9 +326,11 @@ def alert(title, desc, priority, query, streams, window_min=5, group_by=(), seri
 
 def ensure_alerts(streams, email_id, webhook_id):
     s = streams
-    fw, ids, auth, conf, vpn, ti, web, integrity = (
+    fw, ids, auth, conf, vpn, dhcp, ti, web, integrity = (
         s["OPNsense - firewall"], s["OPNsense - ids"], s["OPNsense - auth"], s["OPNsense - config"],
-        s["OPNsense - vpn"], s["SIEM - Threat intel hits"], s["SIEM - Web filtering"], s["SIEM - Log integrity"])
+        s["OPNsense - vpn"], s["OPNsense - dhcp"], s["SIEM - Threat intel hits"], s["SIEM - Web filtering"],
+        s["SIEM - Log integrity"])
+    switch, wifi, capacity = s["Network - switch"], s["Network - wifi"], s["SIEM - Capacity"]
     definitions = [
         alert("[NET-01] Port scan from single source",
               ">= 15 distinct destination ports blocked from one source within 1 minute.",
@@ -354,9 +370,9 @@ def ensure_alerts(streams, email_id, webhook_id):
               HIGH, "event_category:dns", [ti], 5,
               ["src_ip", "dns_query", "threat_category"], ("count", None), (">=", 1)),
         alert("[WEB-01] Repeated access to blocked web category",
-              ">= 10 DNS queries to blocked categories (gambling, adult, drugs, p2p, malware) from one host "
-              "within 1 hour - policy violation or infected host (ISO A.8.23).",
-              MEDIUM, "web_policy:block", [web], 60, ["src_ip", "src_zone"], ("count", None), (">=", 10),
+              ">= 10 DNS queries answered from the Unbound blocklist (gambling, adult, drugs, p2p, malware) from one "
+              "host within 1 hour - policy violation or infected host (ISO A.8.23).",
+              MEDIUM, DNS_BLOCKED, [web], 60, ["src_ip", "src_zone"], ("count", None), (">=", 10),
               grace_min=60),
         alert("[WEB-02] Attempt to bypass DNS filtering",
               ">= 3 blocked connections to DoT (853), outside DNS (53) or DoH resolvers from one host "
@@ -371,6 +387,35 @@ def ensure_alerts(streams, email_id, webhook_id):
               "(ISO A.8.15 / A.5.28, NFR-11).",
               HIGH, "event_type:log_manifest_verify AND result:FAIL", [integrity], 5,
               ["source", "mismatch", "missing"], ("count", None), (">=", 1)),
+        alert("[OPS-03] SIEM disk usage high",
+              "tools/disk_check.py found the SIEM data disk above DISK_WARN_PCT (default 75%) - add disk before "
+              "OpenSearch stops writing at 95% and logs are lost (ISO A.8.6 / A.8.15, Q6).",
+              MEDIUM, "event_type:disk_check AND result:WARN", [capacity], 5,
+              ["source", "path", "used_pct"], ("count", None), (">=", 1), grace_min=24 * 60),
+        # --- switch / Wi-Fi AP (Q9; log formats simulated until the real models are known) ---
+        alert("[NET-03] Unknown device on the office network",
+              "A MAC address that is not in assets.csv got a DHCP lease or joined the Staff Wi-Fi in the office "
+              "zone, or the switch blocked one with port security (ISO A.5.9 / A.8.20).",
+              MEDIUM, "(mac_known:false AND src_zone:LAN\\-Office AND event_type:(dhcp_lease OR wifi_connected)) "
+                      "OR event_type:port_security_violation", [dhcp, wifi, switch], 5,
+              ["src_mac", "event_type", "net_device"], ("count", None), (">=", 1), grace_min=60),
+        alert("[NET-04] Switch port flapping",
+              ">= 5 link-down events on the same switch port within 10 minutes - bad cable, loop or someone "
+              "plugging devices in and out (ISO A.8.20).",
+              LOW, "event_type:port_down", [switch], 10, ["net_device", "net_port"], ("count", None), (">=", 5),
+              grace_min=60),
+        alert("[IAM-05] Switch / AP admin brute force",
+              ">= 5 failed admin logins to a switch or AP from the same source within 5 minutes (ISO A.8.5).",
+              HIGH, "event_type:device_login_failure", [switch, wifi], 5, ["src_ip", "src_zone", "net_device"],
+              ("count", None), (">=", 5)),
+        alert("[IAM-06] Switch / AP admin login from outside Management zone",
+              "Successful admin login to a switch or AP from a non-management network (ISO A.8.2 / A.8.5).",
+              MEDIUM, "event_type:device_login_success AND NOT src_zone:Management", [switch, wifi], 5,
+              ["user", "src_ip", "src_zone", "net_device"], ("count", None), (">=", 1)),
+        alert("[CHG-02] Switch / AP configuration changed",
+              "Every switch or AP config change, with who/where (ISO A.8.9 / A.8.32 change evidence).",
+              LOW, "event_type:device_config_change", [switch, wifi], 5,
+              ["user", "src_ip", "net_device"], ("count", None), (">=", 1)),
     ]
     existing = {d["title"]: d for d in api("GET", "/api/events/definitions?per_page=200")["event_definitions"]}
     for d in definitions:
@@ -415,6 +460,7 @@ def dashboard_specs(s):
     """(title, summary, widgets); s maps stream title -> id."""
     fw, ids, auth, conf, vpn = (s[f"OPNsense - {n}"] for n in ("firewall", "ids", "auth", "config", "vpn"))
     ti, web, events = s["SIEM - Threat intel hits"], s["SIEM - Web filtering"], [EVENTS_STREAM]
+    switch, wifi, dhcp = s["Network - switch"], s["Network - wifi"], s["OPNsense - dhcp"]
     guest_to_internal = "src_zone:Guest AND fw_action:block AND dst_zone:(Server OR LAN\\-Office OR Management)"
     return [
         ("SIEM - Overview (management)", "Log volume, alerts, web policy violations and privileged activity", [
@@ -422,11 +468,12 @@ def dashboard_specs(s):
             number("Firewall admin logins", "event_type:gui_login_success", [auth]),
             number("Failed admin logins", "event_type:gui_login_failure", [auth]),
             number("Firewall config changes", "event_type:config_change", [conf]),
-            agg("Log volume by category", "event_source:opnsense", ["timestamp"], ["event_category"], "bar", w=12),
+            agg("Log volume by category", "event_source:(opnsense OR switch OR wifi\\-ap)", ["timestamp"],
+                ["event_category"], "bar", w=12),
             agg("Alerts over time by priority (1 low, 2 medium, 3 high)", "", ["timestamp"], ["priority"], "bar",
                 events),
             agg("Top alerts", "", ["event_definition_id"], streams=events, limit=15),
-            agg("Top blocked web categories", "web_policy:block", ["web_category"], viz="pie", streams=[web]),
+            agg("Top blocked web categories", DNS_BLOCKED, ["web_category"], viz="pie", streams=[web]),
             agg("Admin logins and config changes by user", "event_type:(gui_login_success OR config_change)",
                 ["user"], ["event_type"], streams=[auth, conf]),
         ]),
@@ -450,8 +497,8 @@ def dashboard_specs(s):
                      [conf]),
         ]),
         ("SIEM - Web filtering & threat", "Web category policy, DNS filter bypass, IDS alerts and threat-intel hits", [
-            agg("Blocked web categories", "web_policy:block", ["web_category"], viz="pie", streams=[web], w=4),
-            agg("Top hosts querying blocked categories", "web_policy:block", ["src_ip", "src_host", "src_owner"],
+            agg("Blocked web categories", DNS_BLOCKED, ["web_category"], viz="pie", streams=[web], w=4),
+            agg("Top hosts querying blocked categories", DNS_BLOCKED, ["src_ip", "src_host", "src_owner"],
                 streams=[web], limit=15, w=8),
             agg("Monitored category usage", "web_policy:monitor", ["web_category"], viz="bar", streams=[web], w=4),
             agg("DNS filter bypass attempts by source (columns: port)", "fw_rule_tag:dns\\-bypass",
@@ -459,6 +506,22 @@ def dashboard_specs(s):
             agg("IDS signatures", "", ["ids_signature", "ids_priority"], streams=[ids], limit=15),
             agg("Threat-intel hits by IOC", "", ["threat_ioc", "threat_category"], ["event_category"],
                 streams=[ti], limit=15),
+        ]),
+        ("SIEM - Switch & Wi-Fi", "Unknown devices, Wi-Fi clients per SSID, switch ports and network device admin", [
+            agg("Wi-Fi connections over time by SSID", "event_type:wifi_connected", ["timestamp"], ["wifi_ssid"],
+                "bar", [wifi], w=12),
+            agg("Unknown devices on the office network (ISO A.5.9)",
+                "(mac_known:false AND src_zone:LAN\\-Office) OR event_type:port_security_violation",
+                ["src_mac", "event_type", "net_device"], streams=[dhcp, wifi, switch], limit=15),
+            agg("Wrong Wi-Fi password by AP and device", "event_type:wifi_possible_psk_mismatch",
+                ["net_device", "src_mac"], streams=[wifi], limit=15),
+            agg("Switch link-down events by port", "event_type:port_down", ["net_device", "net_port"],
+                streams=[switch], limit=15),
+            agg("Switch / AP admin logins (columns: result)",
+                "event_type:(device_login_success OR device_login_failure)", ["net_device", "src_ip", "user"],
+                ["event_type"], streams=[switch, wifi], limit=15),
+            messages("Recent switch / AP config changes", "event_type:device_config_change",
+                     ["net_device", "user", "src_ip", "changed_via"], [switch, wifi]),
         ]),
     ]
 

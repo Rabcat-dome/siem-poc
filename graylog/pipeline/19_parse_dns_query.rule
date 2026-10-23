@@ -1,8 +1,9 @@
 rule "opnsense: parse Unbound DNS query"
 when
   to_string($message.application_name) == "unbound" &&
-  contains(to_string($message.message), " info: ")
+  regex("info: [0-9a-fA-F.:]+ \\S+ \\S+ IN", to_string($message.message)).matches == true
 then
+  // log-queries: <client> <qname> <qtype> <qclass>; blocked answers are a different line (19b)
   let m = regex("info: ([0-9a-fA-F.:]+) (\\S+?)\\.? (\\S+) IN", to_string($message.message), ["src_ip", "dns_query", "dns_qtype"]);
   set_field("event_source", "opnsense");
   set_field("event_category", "dns");

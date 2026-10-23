@@ -1,6 +1,7 @@
 rule "route: web filtering"
 when
-  has_field("web_category") || to_string($message.fw_rule_tag) == "dns-bypass"
+  has_field("web_category") || to_string($message.dns_action) == "block" ||
+  to_string($message.fw_rule_tag) == "dns-bypass"
 then
   route_to_stream(name: "SIEM - Web filtering");
 end

@@ -1,0 +1,17 @@
+rule "wifi: parse hostapd station event"
+when
+  regex("hostapd: \\S+: AP-STA-[A-Z-]+ [0-9a-fA-F:]{17}", to_string($message.message)).matches == true
+then
+  // hostapd control events (UniFi, OpenWrt and most Linux-based APs; simulated until the AP model is known, Q9):
+  //   ap-office01 hostapd: wlan0: AP-STA-CONNECTED 3c:22:fb:10:00:21
+  //   AP-STA-CONNECTED -> wifi_connected, AP-STA-DISCONNECTED -> wifi_disconnected,
+  //   AP-STA-POSSIBLE-PSK-MISMATCH (wrong Wi-Fi password) -> wifi_possible_psk_mismatch
+  let m = regex("hostapd: (\\S+): AP-STA-([A-Z-]+) ([0-9a-fA-F:]{17})", to_string($message.message),
+                ["wifi_iface", "event", "mac"]);
+  set_field("event_source", "wifi-ap");
+  set_field("event_category", "wifi");
+  set_field("event_type", concat("wifi_", lowercase(regex_replace("-", to_string(m["event"]), "_", true))));
+  set_field("net_device", $message.source);
+  set_field("wifi_iface", m["wifi_iface"]);
+  set_field("src_mac", lowercase(to_string(m["mac"])));
+end

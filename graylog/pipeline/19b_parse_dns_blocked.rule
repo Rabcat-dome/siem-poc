@@ -1,0 +1,22 @@
+rule "opnsense: parse Unbound blocked query (blocklist)"
+when
+  to_string($message.application_name) == "unbound" &&
+  regex("info: \\S+ (?:always_[a-z]+|redirect|static|deny|refuse|inform_deny) [0-9a-fA-F.:]+@[0-9]+ ", to_string($message.message)).matches == true
+then
+  // Unbound log-local-actions: <blocklist zone> <local-zone type> <client>@<port> <qname> <qtype> <qclass>
+  //   e.g. info: slot-888.example. always_null 192.168.10.23@51234 www.slot-888.example. A IN
+  // The simulator sends this format; check it against a real blocklist hit before go-live (tests/pipeline_cases.json).
+  let m = regex("info: (\\S+?)\\.? (\\S+) ([0-9a-fA-F.:]+)@[0-9]+ (\\S+?)\\.? (\\S+) IN", to_string($message.message),
+                ["dns_block_zone", "dns_block_type", "src_ip", "dns_query", "dns_qtype"]);
+  set_field("event_source", "opnsense");
+  set_field("event_category", "dns");
+  set_field("event_type", "dns_blocked");
+  set_field("dns_action", "block");
+  set_field("dns_block_zone", lowercase(to_string(m["dns_block_zone"])));
+  set_field("dns_block_type", m["dns_block_type"]);
+  set_field("src_ip", m["src_ip"]);
+  set_field("dns_query", lowercase(to_string(m["dns_query"])));
+  set_field("dns_qtype", m["dns_qtype"]);
+  let p = regex("^[^.]+\\.(.+\\..+)$", lowercase(to_string(m["dns_query"])), ["parent"]);
+  set_field("dns_parent", p["parent"]);
+end

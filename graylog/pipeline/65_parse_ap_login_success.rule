@@ -1,0 +1,16 @@
+rule "wifi: parse AP admin login success (dropbear)"
+when
+  regex("dropbear\\[[0-9]+\\]: Password auth succeeded for '[^']*' from ", to_string($message.message)).matches == true
+then
+  //   ap-office01 dropbear[1234]: Password auth succeeded for 'admin' from 192.168.99.10:51234
+  let m = regex("Password auth succeeded for '([^']*)' from ([0-9a-fA-F.:]+?):([0-9]+)$", to_string($message.message),
+                ["user", "src_ip", "src_port"]);
+  set_field("event_source", "wifi-ap");
+  set_field("event_category", "wifi");
+  set_field("event_type", "device_login_success");
+  set_field("event_outcome", "success");
+  set_field("net_device", $message.source);
+  set_field("user", m["user"]);
+  set_field("src_ip", m["src_ip"]);
+  set_field("src_port", to_long(m["src_port"]));
+end

@@ -30,6 +30,8 @@ BKK = timezone(timedelta(hours=7))  # Thailand has no DST
 URL = os.getenv("GRAYLOG_URL", "http://localhost:9000").rstrip("/")
 AUTH = base64.b64encode(f"{os.getenv('GRAYLOG_USER', 'admin')}:{os.getenv('GRAYLOG_PASSWORD', 'admin')}".encode()).decode()
 EMPTY = ("(Empty Value)", "-", None)
+# Unbound blocklist answers; keep in step with DNS_BLOCKED in provisioner/provision.py
+DNS_BLOCKED = "event_type:dns_blocked"
 # production Graylog is HTTPS with the private CA from tools/gen_tls_certs.sh
 TLS = ssl.create_default_context(cafile=os.environ["GRAYLOG_CA_FILE"]) if os.getenv("GRAYLOG_CA_FILE") else None
 
@@ -160,9 +162,9 @@ def build(period):
                      table(["Alert", "Priority", "จำนวนครั้ง"], alert_rows)))
     s.append(section("3. Web filtering", "A.8.23 Web filtering",
                      "หมวดเว็บที่ถูกบล็อก เครื่องที่พยายามเข้าบ่อย และการพยายามเลี่ยง DNS filtering",
-                     "<h3>หมวดที่ถูกบล็อก</h3>" + table(["หมวด", "จำนวน query"], aggregate(period, "web_policy:block", ["web_category"]))
+                     "<h3>หมวดที่ถูกบล็อก</h3>" + table(["หมวด", "จำนวน query"], aggregate(period, DNS_BLOCKED, ["web_category"]))
                      + "<h3>เครื่องที่ query หมวดที่ถูกบล็อกมากที่สุด</h3>"
-                     + table(["IP", "เครื่อง", "เจ้าของ", "จำนวน"], aggregate(period, "web_policy:block", ["src_ip", "src_host", "src_owner"]))
+                     + table(["IP", "เครื่อง", "เจ้าของ", "จำนวน"], aggregate(period, DNS_BLOCKED, ["src_ip", "src_host", "src_owner"]))
                      + "<h3>หมวดที่ monitor (อนุญาตแต่บันทึก)</h3>" + table(["หมวด", "จำนวน query"], aggregate(period, "web_policy:monitor", ["web_category"]))
                      + "<h3>พยายามเลี่ยง DNS filtering</h3>"
                      + table(["IP", "เครื่อง", "จำนวน"], aggregate(period, "fw_rule_tag:dns\\-bypass", ["src_ip", "src_host"]))))
@@ -183,12 +185,35 @@ def build(period):
                      "<h3>Admin login สำเร็จ</h3>" + table(["เวลา", "User", "IP", "Zone"], [(local_time(r[0]), *r[1:]) for r in logins])
                      + "<h3>Config change</h3>" + table(["เวลา", "User", "IP", "แก้ผ่าน", "Change request #"],
                                                        [(local_time(r[0]), *r[1:], "") for r in changes])))
+    unknown = aggregate(period, "(mac_known:false AND src_zone:LAN\\-Office) OR event_type:port_security_violation",
+                        ["src_mac", "event_type", "net_device"])
+    dev_logins = messages(period, "event_type:device_login_success", ["timestamp", "net_device", "user", "src_ip", "src_zone"])
+    dev_changes = messages(period, "event_type:device_config_change", ["timestamp", "net_device", "user", "src_ip"])
+    s.append(section("7. อุปกรณ์เครือข่าย (switch / Wi-Fi)", "A.5.9 Inventory of assets · A.8.2 · A.8.9 / A.8.32",
+                     "เครื่องที่ไม่อยู่ในทะเบียน asset ที่เข้ามาในโซน Office, การ login หน้า admin ของ switch/AP และการแก้ config",
+                     "<h3>เครื่องที่ไม่อยู่ในทะเบียน asset</h3>" + table(["MAC", "เห็นจาก", "อุปกรณ์", "จำนวน"], unknown)
+                     + "<h3>Admin login สำเร็จที่ switch / AP</h3>"
+                     + table(["เวลา", "อุปกรณ์", "User", "IP", "Zone"], [(local_time(r[0]), *r[1:]) for r in dev_logins])
+                     + "<h3>Config change ของ switch / AP</h3>"
+                     + table(["เวลา", "อุปกรณ์", "User", "IP", "Change request #"], [(local_time(r[0]), *r[1:], "") for r in dev_changes])))
     verifies = messages(period, "event_type:log_manifest_verify", ["timestamp", "source", "result", "ok", "mismatch", "missing"])
-    s.append(section("7. ความถูกต้องของ log archive", "A.8.15 Logging · A.5.28 Evidence (NFR-11)",
+    s.append(section("8. ความถูกต้องของ log archive", "A.8.15 Logging · A.5.28 Evidence (NFR-11)",
                      "ผลการตรวจ SHA-256 manifest ของไฟล์ archive (ควรมีอย่างน้อยเดือนละครั้งและผลเป็น PASS)",
                      table(["เวลา", "เครื่อง", "ผล", "OK", "Mismatch", "Missing"], [(local_time(r[0]), *r[1:]) for r in verifies],
                            empty="ไม่มีการตรวจในช่วงนี้ ต้องรัน tools/log_manifest.py verify")))
-    s.append(section("8. ความต่อเนื่องของ log รายวัน", "A.8.15 · A.8.16", "จำนวน log จาก OPNsense ต่อวัน",
+    disk = aggregate(period, "event_type:disk_check", ["source", "path", "result"], limit=50)
+    peak = aggregate(period, "event_type:disk_check", ["source", "path", "used_pct"], limit=1000)
+    highest = {}
+    for host, path, pct, _ in peak:
+        try:
+            highest[(host, path)] = max(highest.get((host, path), 0), int(pct))
+        except (TypeError, ValueError):
+            pass
+    s.append(section("9. พื้นที่ disk ของ SIEM", "A.8.6 Capacity management (Q6, OPS-03)",
+                     "ไม่ได้วัด EPS ก่อนขึ้นระบบ จึงใช้ผลตรวจ disk รายชั่วโมงแทน ถ้ามีผล WARN ให้วางแผนขยาย disk",
+                     table(["เครื่อง", "Path", "ผล", "จำนวนครั้ง"], disk, empty="ไม่มีผลตรวจในช่วงนี้ ต้องตั้ง job disk-check")
+                     + (table(["เครื่อง", "Path", "ใช้สูงสุด (%)"], [(h, p, v) for (h, p), v in sorted(highest.items())]) if highest else "")))
+    s.append(section("10. ความต่อเนื่องของ log รายวัน", "A.8.15 · A.8.16", "จำนวน log จาก OPNsense ต่อวัน",
                      table(["วันที่", "จำนวน log"], days)))
     return s, total, len(events)
 

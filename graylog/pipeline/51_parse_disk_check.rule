@@ -1,0 +1,12 @@
+rule "siem tools: parse disk check result"
+when
+  to_string($message.application_name) == "disk-check"
+then
+  // tools/disk_check.py sends: action=disk_check path=/var/lib/docker used_pct=82 free_gb=90.5 total_gb=500.0 warn_pct=75 result=WARN
+  let kv = key_value(value: to_string($message.message), delimiters: " ", kv_delimiters: "=");
+  set_fields(kv);
+  set_field("disk_used_pct", to_long(kv["used_pct"]));
+  set_field("event_source", "siem-tools");
+  set_field("event_category", "capacity");
+  set_field("event_type", "disk_check");
+end

@@ -1,0 +1,13 @@
+rule "switch: parse configuration change"
+when
+  contains(to_string($message.message), "%SYS-5-CONFIG_I:")
+then
+  //   %SYS-5-CONFIG_I: Configured from console by admin on vty0 (192.168.99.10)
+  let m = regex("Configured from (\\S+) by (\\S+?)(?: on (\\S+))?(?: \\(([0-9a-fA-F.:]+)\\))?$",
+                to_string($message.message), ["changed_via", "user", "net_line", "src_ip"]);
+  set_field("event_source", "switch");
+  set_field("event_category", "switch");
+  set_field("event_type", "device_config_change");
+  set_field("net_device", $message.source);
+  set_fields(m);
+end

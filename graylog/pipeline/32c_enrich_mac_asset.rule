@@ -1,0 +1,10 @@
+rule "enrich: asset owner by MAC (Wi-Fi / switch events without an IP)"
+when
+  has_field("src_mac") && !has_field("src_ip") &&
+  is_not_null(lookup_value("asset-mac-hostname", lowercase(to_string($message.src_mac))))
+then
+  let mac = lowercase(to_string($message.src_mac));
+  set_field("src_host", lookup_value("asset-mac-hostname", mac));
+  set_field("src_owner", lookup_value("asset-mac-owner", mac));
+  set_field("src_department", lookup_value("asset-mac-department", mac));
+end

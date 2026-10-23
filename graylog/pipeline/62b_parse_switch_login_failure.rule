@@ -1,0 +1,17 @@
+rule "switch: parse admin login failure"
+when
+  contains(to_string($message.message), "%SEC_LOGIN-4-LOGIN_FAILED:")
+then
+  //   %SEC_LOGIN-4-LOGIN_FAILED: Login failed [user: admin] [Source: 192.168.10.23] [localport: 22] [Reason: Login Authentication Failed] at ...
+  let m = regex("\\[user: ([^\\]]*)\\] \\[Source: ([0-9a-fA-F.:]+)\\] \\[localport: ([0-9]+)\\](?: \\[Reason: ([^\\]]*)\\])?",
+                to_string($message.message), ["user", "src_ip", "dst_port", "reason"]);
+  set_field("event_source", "switch");
+  set_field("event_category", "switch");
+  set_field("event_type", "device_login_failure");
+  set_field("event_outcome", "failure");
+  set_field("net_device", $message.source);
+  set_field("user", m["user"]);
+  set_field("src_ip", m["src_ip"]);
+  set_field("dst_port", to_long(m["dst_port"]));
+  set_field("failure_reason", m["reason"]);
+end

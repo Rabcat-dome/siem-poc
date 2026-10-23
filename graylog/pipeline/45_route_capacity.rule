@@ -1,0 +1,6 @@
+rule "route: SIEM capacity"
+when
+  to_string($message.event_category) == "capacity"
+then
+  route_to_stream(name: "SIEM - Capacity");
+end

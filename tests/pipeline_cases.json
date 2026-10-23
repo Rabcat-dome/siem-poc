@@ -275,7 +275,8 @@
     "src_ip": "192.168.10.21",
     "src_mac": "3c:22:fb:10:00:21",
     "dhcp_hostname": "LT-SOMCHAI",
-    "fw_interface": "igb1"
+    "fw_interface": "igb1",
+    "mac_known": true
    }
   },
   {
@@ -367,7 +368,10 @@
     "web_category": "gambling",
     "web_policy": "block",
     "dns_query": "www.slot-888.example"
-   }
+   },
+   "absent": [
+    "dns_action"
+   ]
   },
   {
    "name": "unbound dns: threat intel domain + web category",
@@ -449,6 +453,201 @@
     "local_hour",
     "event_source"
    ]
+  },
+  {
+   "name": "unbound dns: blocklist answer (log-local-actions)",
+   "application_name": "unbound",
+   "message": "[50443:0] info: slot-888.example. always_null 192.168.10.23@51234 www.slot-888.example. A IN",
+   "expect": {
+    "event_category": "dns",
+    "event_type": "dns_blocked",
+    "dns_action": "block",
+    "dns_block_zone": "slot-888.example",
+    "dns_block_type": "always_null",
+    "src_ip": "192.168.10.23",
+    "dns_query": "www.slot-888.example",
+    "dns_qtype": "A",
+    "dns_parent": "slot-888.example",
+    "web_category": "gambling",
+    "web_policy": "block",
+    "src_host": "LT-ANAN"
+   }
+  },
+  {
+   "name": "unbound dns: blocklist answer for a domain with no web category",
+   "application_name": "unbound",
+   "message": "[50443:0] info: ads.tracker.example. always_nxdomain 192.168.10.21@40001 ads.tracker.example. AAAA IN",
+   "expect": {
+    "event_type": "dns_blocked",
+    "dns_block_type": "always_nxdomain",
+    "dns_query": "ads.tracker.example",
+    "dns_qtype": "AAAA"
+   },
+   "absent": [
+    "web_category"
+   ]
+  },
+  {
+   "name": "dhcp lease from a MAC that is not in assets.csv",
+   "application_name": "dhcpd",
+   "message": "DHCPACK on 192.168.10.150 to f0:18:98:5a:3c:71 (MacBook-Pro) via igb1",
+   "expect": {
+    "event_type": "dhcp_lease",
+    "src_mac": "f0:18:98:5a:3c:71",
+    "mac_known": false,
+    "src_zone": "LAN-Office"
+   },
+   "absent": [
+    "src_host"
+   ]
+  },
+  {
+   "name": "switch: port down",
+   "raw": "<187>Oct 23 10:15:32 sw-core01 %LINK-3-UPDOWN: Interface GigabitEthernet1/0/12, changed state to down",
+   "expect": {
+    "event_source": "switch",
+    "event_category": "switch",
+    "event_type": "port_down",
+    "net_device": "sw-core01",
+    "net_port": "GigabitEthernet1/0/12",
+    "source": "sw-core01"
+   },
+   "absent": [
+    "application_name"
+   ]
+  },
+  {
+   "name": "switch: port up",
+   "raw": "<187>Oct  3 09:01:02 sw-core01 %LINK-3-UPDOWN: Interface GigabitEthernet1/0/12, changed state to up",
+   "expect": {
+    "event_type": "port_up",
+    "net_port": "GigabitEthernet1/0/12"
+   }
+  },
+  {
+   "name": "switch: port-security violation, Cisco MAC normalised + unknown",
+   "raw": "<186>Oct 23 10:15:32 sw-core01 %PORT_SECURITY-2-PSECURE_VIOLATION: Security violation occurred, caused by MAC address B827.EB12.3456 on port GigabitEthernet1/0/9.",
+   "expect": {
+    "event_type": "port_security_violation",
+    "src_mac": "b8:27:eb:12:34:56",
+    "mac_known": false,
+    "net_port": "GigabitEthernet1/0/9"
+   }
+  },
+  {
+   "name": "switch: admin login success (zone + asset from source IP)",
+   "raw": "<189>Oct 23 10:15:32 sw-core01 %SEC_LOGIN-5-LOGIN_SUCCESS: Login Success [user: admin] [Source: 192.168.99.10] [localport: 22] at 10:15:32 ICT Fri Oct 23 2026",
+   "expect": {
+    "event_type": "device_login_success",
+    "event_outcome": "success",
+    "user": "admin",
+    "src_ip": "192.168.99.10",
+    "src_zone": "Management",
+    "src_host": "ADMIN-WS01",
+    "dst_port": 22
+   }
+  },
+  {
+   "name": "switch: admin login failure",
+   "raw": "<188>Oct 23 10:15:32 sw-core01 %SEC_LOGIN-4-LOGIN_FAILED: Login failed [user: cisco] [Source: 192.168.10.23] [localport: 22] [Reason: Login Authentication Failed] at 10:15:32 ICT Fri Oct 23 2026",
+   "expect": {
+    "event_type": "device_login_failure",
+    "event_outcome": "failure",
+    "user": "cisco",
+    "src_ip": "192.168.10.23",
+    "src_zone": "LAN-Office",
+    "failure_reason": "Login Authentication Failed"
+   }
+  },
+  {
+   "name": "switch: configuration change",
+   "raw": "<189>Oct 23 10:15:32 sw-core01 %SYS-5-CONFIG_I: Configured from console by admin on vty0 (192.168.99.10)",
+   "expect": {
+    "event_type": "device_config_change",
+    "user": "admin",
+    "changed_via": "console",
+    "net_line": "vty0",
+    "src_ip": "192.168.99.10",
+    "net_device": "sw-core01"
+   }
+  },
+  {
+   "name": "wifi: known laptop joins Staff SSID (owner by MAC)",
+   "raw": "<30>Oct 23 10:15:32 ap-office01 hostapd: wlan0: AP-STA-CONNECTED 3C:22:FB:10:00:21",
+   "expect": {
+    "event_source": "wifi-ap",
+    "event_category": "wifi",
+    "event_type": "wifi_connected",
+    "wifi_iface": "wlan0",
+    "wifi_ssid": "Staff",
+    "src_zone": "LAN-Office",
+    "src_mac": "3c:22:fb:10:00:21",
+    "mac_known": true,
+    "src_host": "LT-SOMCHAI",
+    "src_owner": "somchai.k",
+    "net_device": "ap-office01"
+   },
+   "absent": [
+    "src_ip"
+   ]
+  },
+  {
+   "name": "wifi: unknown phone on Guest SSID",
+   "raw": "<30>Oct 23 10:15:32 ap-office01 hostapd: wlan0-1: AP-STA-DISCONNECTED a4:83:e7:30:00:51",
+   "expect": {
+    "event_type": "wifi_disconnected",
+    "wifi_ssid": "Guest",
+    "src_zone": "Guest",
+    "mac_known": false
+   },
+   "absent": [
+    "src_host"
+   ]
+  },
+  {
+   "name": "wifi: wrong Wi-Fi password",
+   "raw": "<28>Oct 23 10:15:32 ap-office01 hostapd: wlan1: AP-STA-POSSIBLE-PSK-MISMATCH f0:18:98:5a:3c:71",
+   "expect": {
+    "event_type": "wifi_possible_psk_mismatch",
+    "wifi_ssid": "Staff",
+    "mac_known": false
+   }
+  },
+  {
+   "name": "wifi: AP admin login success (dropbear)",
+   "raw": "<85>Oct 23 10:15:32 ap-office01 dropbear[4321]: Password auth succeeded for 'admin' from 192.168.99.10:51234",
+   "expect": {
+    "event_source": "wifi-ap",
+    "event_type": "device_login_success",
+    "user": "admin",
+    "src_ip": "192.168.99.10",
+    "src_port": 51234,
+    "src_zone": "Management"
+   }
+  },
+  {
+   "name": "wifi: AP admin login failure (dropbear)",
+   "raw": "<84>Oct 23 10:15:32 ap-office01 dropbear[4321]: Bad password attempt for 'admin' from 192.168.10.23:40022",
+   "expect": {
+    "event_type": "device_login_failure",
+    "user": "admin",
+    "src_ip": "192.168.10.23",
+    "src_zone": "LAN-Office"
+   }
+  },
+  {
+   "name": "disk-check result",
+   "application_name": "disk-check",
+   "source": "siem01",
+   "message": "action=disk_check path=/var/lib/docker used_pct=82 free_gb=90.5 total_gb=500.0 warn_pct=75 result=WARN",
+   "expect": {
+    "event_source": "siem-tools",
+    "event_category": "capacity",
+    "event_type": "disk_check",
+    "result": "WARN",
+    "path": "/var/lib/docker",
+    "disk_used_pct": 82
+   }
   },
   {
    "name": "raw RFC5424 line: dnsmasq via full syslog (template for real samples)",

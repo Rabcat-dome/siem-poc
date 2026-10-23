@@ -1,0 +1,5 @@
+"iface","ssid","zone"
+"wlan0","Staff","LAN-Office"
+"wlan1","Staff","LAN-Office"
+"wlan0-1","Guest","Guest"
+"wlan1-1","Guest","Guest"

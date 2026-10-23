@@ -13,13 +13,26 @@ stage 0 match pass
   rule "opnsense: parse DHCP lease (ISC dhcpd)";
   rule "opnsense: parse DHCP lease (dnsmasq)";
   rule "opnsense: parse Unbound DNS query";
+  rule "opnsense: parse Unbound blocked query (blocklist)";
+  rule "switch: parse port up/down";
+  rule "switch: parse port-security violation";
+  rule "switch: parse admin login success";
+  rule "switch: parse admin login failure";
+  rule "switch: parse configuration change";
+  rule "wifi: parse hostapd station event";
+  rule "wifi: parse AP admin login success (dropbear)";
+  rule "wifi: parse AP admin login failure (dropbear)";
   rule "siem tools: parse log manifest result";
+  rule "siem tools: parse disk check result";
 stage 1 match pass
   rule "opnsense: filterlog ports (tcp/udp)";
   rule "opnsense: filterlog ports IPv6 (tcp/udp)";
   rule "enrich: source network zone";
+  rule "enrich: Wi-Fi SSID and zone of the AP interface";
   rule "enrich: destination network zone";
   rule "enrich: source asset owner (who)";
+  rule "enrich: MAC address in asset inventory";
+  rule "enrich: asset owner by MAC (Wi-Fi / switch events without an IP)";
   rule "enrich: destination asset";
   rule "enrich: firewall rule description";
   rule "enrich: firewall rule tag";
@@ -31,7 +44,9 @@ stage 1 match pass
   rule "web filter: category of parent domain";
 stage 2 match pass
   rule "route: OPNsense category stream";
+  rule "route: network device stream";
   rule "route: threat intel hits";
   rule "route: web filtering";
   rule "route: log integrity";
+  rule "route: SIEM capacity";
 end

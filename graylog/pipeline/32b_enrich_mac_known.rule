@@ -1,0 +1,7 @@
+rule "enrich: MAC address in asset inventory"
+when
+  has_field("src_mac")
+then
+  // false = a device that is not in assets.csv (no DHCP static mapping), used by NET-03
+  set_field("mac_known", is_not_null(lookup_value("asset-mac-hostname", lowercase(to_string($message.src_mac)))));
+end

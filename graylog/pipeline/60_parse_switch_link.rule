@@ -1,0 +1,14 @@
+rule "switch: parse port up/down"
+when
+  regex("%LINK-[0-7]-UPDOWN: Interface \\S+, changed state to (?:up|down)", to_string($message.message)).matches == true
+then
+  // Cisco IOS-style mnemonic (simulated until the real switch model is known, Q9):
+  //   sw-core01 %LINK-3-UPDOWN: Interface GigabitEthernet1/0/12, changed state to down
+  let m = regex("%LINK-[0-7]-UPDOWN: Interface (\\S+), changed state to (up|down)", to_string($message.message),
+                ["net_port", "state"]);
+  set_field("event_source", "switch");
+  set_field("event_category", "switch");
+  set_field("event_type", concat("port_", to_string(m["state"])));
+  set_field("net_device", $message.source);
+  set_field("net_port", m["net_port"]);
+end

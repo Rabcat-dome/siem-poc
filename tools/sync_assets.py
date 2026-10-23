@@ -6,7 +6,11 @@ Identity lives in the static mapping's description, one convention for every bac
   owner=somchai.k;dept=Finance;crit=medium
 
 Missing keys give an empty cell, free text without "=" is ignored, crit must be
-low|medium|high|critical (anything else is dropped with a warning). Hosts that are
+low|medium|high|critical (anything else is dropped with a warning). The mapping's
+MAC goes into the mac column and into assets_mac.csv (one row per MAC: Graylog's
+CSV adapter refuses duplicate keys, empty ones included), which NET-03 uses to
+spot devices that are not in the inventory (Wi-Fi and switch events carry a MAC
+but no IP). Hosts that are
 not DHCP-mapped (servers, firewall interfaces) live in assets_static.csv, which is
 merged in and wins on an IP conflict. The result is written atomically
 (temp file + rename) and a diff against the old file is printed.
@@ -36,7 +40,9 @@ import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 
-HEADER = ["ip", "hostname", "owner", "department", "criticality"]
+HEADER = ["ip", "hostname", "owner", "department", "criticality", "mac"]
+OLD_HEADER = HEADER[:5]  # assets.csv written before the mac column existed
+MAC_HEADER = ["mac", "hostname", "owner", "department"]
 CRIT = {"low", "medium", "high", "critical"}
 LOOKUP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "graylog", "lookup")
 
@@ -59,14 +65,24 @@ def parse_descr(descr):
     return kv.get("owner", ""), kv.get("dept", ""), crit
 
 
-def make_row(ip, hostname, descr):
+def norm_mac(mac):
+    """'3C-22-FB-10-00-21' / '3c22.fb10.0021' -> '3c:22:fb:10:00:21'; anything else -> ''."""
+    hexs = "".join(c for c in str(mac or "").lower() if c in "0123456789abcdef")
+    if len(hexs) != 12:
+        if mac:
+            warn(f"ignoring MAC {mac!r}")
+        return ""
+    return ":".join(hexs[i:i + 2] for i in range(0, 12, 2))
+
+
+def make_row(ip, hostname, descr, mac=""):
     try:
         ip = str(ipaddress.IPv4Address(str(ip).strip()))
     except ValueError:
         warn(f"skipping mapping with bad IPv4 address {ip!r}")
         return None
     owner, dept, crit = parse_descr(descr)
-    return [ip, (hostname or "").strip(), owner, dept, crit]
+    return [ip, (hostname or "").strip(), owner, dept, crit, norm_mac(mac)]
 
 
 # ---- OPNsense API ----------------------------------------------------------
@@ -101,7 +117,7 @@ def grid(args, path):
 def from_kea(args):
     rows = []
     for r in grid(args, "/api/kea/dhcpv4/search_reservation"):
-        row = make_row(r.get("ip_address"), r.get("hostname"), r.get("description"))
+        row = make_row(r.get("ip_address"), r.get("hostname"), r.get("description"), r.get("hw_address"))
         if row:
             rows.append(row)
     return rows
@@ -116,7 +132,8 @@ def from_dnsmasq(args):
         ips = [i.strip() for i in str(r.get("ip") or "").split(",") if "." in i]
         if not ips:
             continue  # IPv6-only or empty (e.g. a MAC-only host entry)
-        row = make_row(ips[0], r.get("host"), r.get("descr"))
+        # hwaddr can also be a list; the first MAC is the one the lease goes to
+        row = make_row(ips[0], r.get("host"), r.get("descr"), str(r.get("hwaddr") or "").split(",")[0])
         if row:
             rows.append(row)
     return rows
@@ -128,10 +145,10 @@ def from_config_xml(args):
     except (OSError, ET.ParseError) as e:
         sys.exit(f"{args.from_config_xml}: {e}")
     rows = []
-    # <opnsense><dhcpd><lan><staticmap><ipaddr/><hostname/><descr/>...
+    # <opnsense><dhcpd><lan><staticmap><mac/><ipaddr/><hostname/><descr/>...
     for iface in root.findall("./dhcpd/*"):
         for sm in iface.findall("staticmap"):
-            row = make_row(sm.findtext("ipaddr"), sm.findtext("hostname"), sm.findtext("descr"))
+            row = make_row(sm.findtext("ipaddr"), sm.findtext("hostname"), sm.findtext("descr"), sm.findtext("mac"))
             if row:
                 rows.append(row)
     return rows
@@ -147,17 +164,19 @@ def read_csv(path, required=True):
     with open(path, newline="", encoding="utf-8") as f:
         reader = csv.reader(f)
         head = next(reader, None)
+        if head == OLD_HEADER:
+            return [r + [""] for r in reader if r]
         if head != HEADER:
             sys.exit(f"{path}: header must be {HEADER}, got {head}")
         return [r for r in reader if r]
 
 
-def write_atomic(path, rows):
+def write_atomic(path, rows, header=HEADER):
     fd, tmp = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(path)), prefix=".assets-", suffix=".tmp")
     try:
         with os.fdopen(fd, "w", newline="", encoding="utf-8") as f:
             w = csv.writer(f, quoting=csv.QUOTE_ALL, lineterminator="\n")
-            w.writerow(HEADER)
+            w.writerow(header)
             w.writerows(rows)
         os.chmod(tmp, 0o644)  # mkstemp creates 0600; Graylog's container must read it
         os.replace(tmp, path)
@@ -178,6 +197,19 @@ def merge(mapped, static):
             print(f"note: {row[0]} in assets_static.csv overrides the DHCP mapping")
         by_ip[row[0]] = row
     return sorted(by_ip.values(), key=lambda r: ipaddress.IPv4Address(r[0]))
+
+
+def by_mac(rows):
+    """assets_mac.csv rows: one per MAC, the first IP wins (a MAC mapped in two VLANs is one device)."""
+    seen = {}
+    for ip, hostname, owner, dept, _, mac in rows:
+        if not mac:
+            continue
+        if mac in seen:
+            warn(f"MAC {mac} is mapped twice ({seen[mac][1]} and {hostname}); keeping the first")
+            continue
+        seen[mac] = [mac, hostname, owner, dept]
+    return sorted(seen.values())
 
 
 def print_diff(old, new):
@@ -204,6 +236,7 @@ def main():
     p.add_argument("--timeout", type=int, default=30)
     p.add_argument("--static", default=os.path.join(LOOKUP, "assets_static.csv"))
     p.add_argument("--out", default=os.path.join(LOOKUP, "assets.csv"))
+    p.add_argument("--out-mac", default=os.path.join(LOOKUP, "assets_mac.csv"))
     p.add_argument("--dry-run", action="store_true", help="print the diff, do not write")
     args = p.parse_args()
 
@@ -224,11 +257,13 @@ def main():
     new = merge(mapped, read_csv(args.static, required=False))
     old = read_csv(args.out, required=False)
     changed = print_diff(old, new)
+    mac_rows = by_mac(new)
     if args.dry_run:
         print("dry run: nothing written")
-    elif changed or not os.path.exists(args.out):
+    elif changed or not os.path.exists(args.out) or not os.path.exists(args.out_mac):
         write_atomic(args.out, new)
-        print(f"wrote {args.out}")
+        write_atomic(args.out_mac, mac_rows, MAC_HEADER)
+        print(f"wrote {args.out} and {args.out_mac} ({len(mac_rows)} MACs)")
     else:
         print("no change")
 

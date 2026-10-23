@@ -1,0 +1,7 @@
+rule "route: network device stream"
+when
+  to_string($message.event_source) == "switch" || to_string($message.event_source) == "wifi-ap"
+then
+  // "Network - switch" / "Network - wifi"
+  route_to_stream(name: concat("Network - ", to_string($message.event_category)));
+end

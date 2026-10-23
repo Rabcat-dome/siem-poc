@@ -1,0 +1,8 @@
+rule "enrich: Wi-Fi SSID and zone of the AP interface"
+when
+  has_field("wifi_iface")
+then
+  // wifi_ssids.csv: AP radio interface -> SSID and the zone (VLAN) it bridges to
+  set_field("wifi_ssid", lookup_value("wifi-ssid", to_string($message.wifi_iface)));
+  set_field("src_zone", lookup_value("wifi-zone", to_string($message.wifi_iface)));
+end

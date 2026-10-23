@@ -1,7 +1,7 @@
 #!/bin/sh
 # Install the host-side pieces of the production SIEM (Linux + systemd, run as root):
 #   - siem-firewall.service: DOCKER-USER source restrictions, re-applied after every Docker start
-#   - siem-job@.service + timers: sync, SHA-256 manifest, monthly report, backup
+#   - siem-job@.service + timers: sync, SHA-256 manifest, monthly report, backup, disk check
 #
 #   sudo deploy/install.sh              # install / update and start everything
 #   sudo deploy/install.sh --uninstall
@@ -11,7 +11,7 @@ set -eu
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 UNITS=/etc/systemd/system
-TIMERS="sync-assets sync-web manifest-create manifest-verify monthly-report backup"
+TIMERS="sync-assets sync-web manifest-create manifest-verify monthly-report backup disk-check"
 
 [ "$(id -u)" -eq 0 ] || { echo "run as root (sudo)" >&2; exit 1; }
 command -v systemctl >/dev/null || { echo "systemd not found: use deploy/cron/siem.cron instead" >&2; exit 1; }

@@ -1,0 +1,16 @@
+rule "switch: parse port-security violation"
+when
+  contains(to_string($message.message), "%PORT_SECURITY-2-PSECURE_VIOLATION:")
+then
+  //   %PORT_SECURITY-2-PSECURE_VIOLATION: Security violation occurred, caused by MAC address 0011.2233.4455 on port GigabitEthernet1/0/7.
+  let m = regex("caused by MAC address ([0-9a-fA-F]{4}\\.[0-9a-fA-F]{4}\\.[0-9a-fA-F]{4}) on port (\\S+?)\\.?$",
+                to_string($message.message), ["mac", "net_port"]);
+  // 0011.2233.4455 -> 00:11:22:33:44:55, the form DHCP, Wi-Fi and assets.csv use
+  let hex = lowercase(regex_replace("\\.", to_string(m["mac"]), "", true));
+  set_field("event_source", "switch");
+  set_field("event_category", "switch");
+  set_field("event_type", "port_security_violation");
+  set_field("net_device", $message.source);
+  set_field("net_port", m["net_port"]);
+  set_field("src_mac", regex_replace("(..)(?!$)", hex, "$1:", true));
+end

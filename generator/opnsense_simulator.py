@@ -5,6 +5,12 @@ Emits RFC5424 syslog shaped like a real OPNsense box (filterlog, suricata,
 audit, openvpn, dhcpd, unbound) so the Graylog pipeline rules in this repo
 work unchanged when a real firewall is pointed at the same input.
 
+It also plays a managed switch and a Wi-Fi AP (RFC3164, as most network gear
+sends it) until the real models are known (Q9): the switch speaks Cisco
+IOS-style mnemonics (%LINK-3-UPDOWN ...) and the AP hostapd + dropbear, which
+most Linux-based APs use. Blocked DNS answers use Unbound's log-local-actions
+line. All three formats are assumptions to check against the real devices.
+
 Every INTERVAL_SECONDS it sends a batch of normal traffic, and with
 probability SCENARIO_RATE it also plays one attack scenario so the alerts
 in Graylog have something to fire on.
@@ -18,7 +24,7 @@ import random
 import socket
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 SYSLOG_HOST = os.getenv("SYSLOG_HOST", "graylog")
 SYSLOG_PORT = int(os.getenv("SYSLOG_PORT", "1514"))
@@ -26,6 +32,9 @@ SYSLOG_PROTO = os.getenv("SYSLOG_PROTO", "udp").lower()
 INTERVAL = float(os.getenv("INTERVAL_SECONDS", "5"))
 SCENARIO_RATE = float(os.getenv("SCENARIO_RATE", "0.25"))
 FW_HOSTNAME = os.getenv("FW_HOSTNAME", "opnsense.poc.local")
+SWITCH_HOSTNAME = os.getenv("SWITCH_HOSTNAME", "sw-core01")
+AP_HOSTNAME = os.getenv("AP_HOSTNAME", "ap-office01")
+BKK = timezone(timedelta(hours=7))  # RFC3164 has no zone; the Graylog input reads it as Asia/Bangkok
 
 # --- Simulated company network (documentation IP ranges only) -------------
 WAN_IP = "203.0.113.10"
@@ -47,6 +56,13 @@ GUEST_CLIENTS = [
 SERVERS = {"ad": "192.168.20.10", "file": "192.168.20.11", "erp": "192.168.20.12", "web": "192.168.20.13"}
 ADMIN_WS = "192.168.99.10"
 VPN_USERS = ["somchai.k", "suda.p", "narin.t"]
+# devices that are not in assets.csv: a personal laptop on the office LAN and a Raspberry Pi on a switch port
+ROGUE_LAPTOP = ("192.168.10.150", "MacBook-Pro", "f0:18:98:5a:3c:71")
+ROGUE_PI_MAC = "b827.eb12.3456"  # Cisco notation, the pipeline turns it into b8:27:eb:12:34:56
+
+# switch access ports per office desk, and the AP radios (must match graylog/lookup/wifi_ssids.csv)
+SWITCH_PORTS = [f"GigabitEthernet1/0/{n}" for n in range(1, 17)]
+WIFI_STAFF, WIFI_GUEST = ["wlan0", "wlan1"], "wlan0-1"
 
 BENIGN_DOMAINS = ["www.google.com", "outlook.office365.com", "teams.microsoft.com", "line.me",
                   "www.facebook.com", "github.com", "api.ipify.org", "www.bot.or.th", "s3.amazonaws.com",
@@ -81,8 +97,8 @@ RULES = {
 }
 
 # syslog facility codes
-LOCAL0, AUTH, DAEMON, LOCAL5 = 16, 4, 3, 21
-SEV_ALERT, SEV_WARNING, SEV_NOTICE, SEV_INFO = 1, 4, 5, 6
+LOCAL0, AUTH, DAEMON, AUTHPRIV, LOCAL5, LOCAL7 = 16, 4, 3, 10, 21, 23
+SEV_ALERT, SEV_CRIT, SEV_ERR, SEV_WARNING, SEV_NOTICE, SEV_INFO = 1, 2, 3, 4, 5, 6
 
 
 class Sender:
@@ -103,7 +119,14 @@ class Sender:
                "dhcpd": 2210, "unbound": 50443}.get(app, 1000)
         line = (f"<{facility * 8 + severity}>1 {ts} {FW_HOSTNAME} {app} {pid} - "
                 f'[meta sequenceId="{self.seq}"] {msg}')
-        data = line.encode()
+        self._write(line.encode())
+
+    def send3164(self, host, msg, facility, severity):
+        """BSD syslog, the way switches and APs send it: <pri>Mmm dd hh:mm:ss host msg"""
+        now = datetime.now(BKK)
+        self._write(f"<{facility * 8 + severity}>{now:%b} {now.day:>2} {now:%H:%M:%S} {host} {msg}".encode())
+
+    def _write(self, data):
         try:
             if self.sock is None:
                 self._connect()
@@ -181,6 +204,52 @@ def dns_query(client, domain, qtype="A"):
     out.send("unbound", f"[50443:0] info: {client} {domain}. {qtype} IN", DAEMON, SEV_INFO)
 
 
+def dns_blocked(client, domain, qtype="A"):
+    # log-queries logs the question, log-local-actions the blocklist answer (0.0.0.0 = always_null)
+    dns_query(client, domain, qtype)
+    zone = domain.removeprefix("www.")
+    out.send("unbound", f"[50443:0] info: {zone}. always_null {client}@{eport()} {domain}. {qtype} IN",
+             DAEMON, SEV_INFO)
+
+
+# --- switch (Cisco IOS-style) and Wi-Fi AP (hostapd / dropbear) ------------
+
+def switch_link(port, state):
+    out.send3164(SWITCH_HOSTNAME, f"%LINK-3-UPDOWN: Interface {port}, changed state to {state}", LOCAL7, SEV_ERR)
+
+
+def switch_port_security(mac_dotted, port):
+    out.send3164(SWITCH_HOSTNAME, "%PORT_SECURITY-2-PSECURE_VIOLATION: Security violation occurred, "
+                                  f"caused by MAC address {mac_dotted} on port {port}.", LOCAL7, SEV_CRIT)
+
+
+def switch_login(user, src, ok):
+    at = datetime.now(BKK).strftime("%H:%M:%S ICT %a %b %d %Y")
+    if ok:
+        out.send3164(SWITCH_HOSTNAME, f"%SEC_LOGIN-5-LOGIN_SUCCESS: Login Success [user: {user}] [Source: {src}] "
+                                      f"[localport: 22] at {at}", LOCAL7, SEV_NOTICE)
+    else:
+        out.send3164(SWITCH_HOSTNAME, f"%SEC_LOGIN-4-LOGIN_FAILED: Login failed [user: {user}] [Source: {src}] "
+                                      f"[localport: 22] [Reason: Login Authentication Failed] at {at}",
+                     LOCAL7, SEV_WARNING)
+
+
+def switch_config(user, src):
+    out.send3164(SWITCH_HOSTNAME, f"%SYS-5-CONFIG_I: Configured from console by {user} on vty0 ({src})",
+                 LOCAL7, SEV_NOTICE)
+
+
+def ap_station(iface, event, mac):
+    out.send3164(AP_HOSTNAME, f"hostapd: {iface}: AP-STA-{event} {mac}", DAEMON, SEV_INFO)
+
+
+def ap_login(user, src, ok):
+    pid = random.randint(1000, 9999)
+    text = (f"Password auth succeeded for '{user}' from {src}:{eport()}" if ok
+            else f"Bad password attempt for '{user}' from {src}:{eport()}")
+    out.send3164(AP_HOSTNAME, f"dropbear[{pid}]: {text}", AUTHPRIV, SEV_NOTICE if ok else SEV_WARNING)
+
+
 def eport():
     return random.randint(49152, 65535)
 
@@ -189,8 +258,9 @@ def eport():
 
 def baseline_event():
     kind = random.choices(
-        ["lan_web", "lan_dns", "wan_noise", "web_inbound", "vpn_traffic", "guest_web", "dhcp", "icmp"],
-        weights=[30, 20, 20, 10, 8, 6, 3, 3])[0]
+        ["lan_web", "lan_dns", "wan_noise", "web_inbound", "vpn_traffic", "guest_web", "dhcp", "icmp", "wifi",
+         "switch_port"],
+        weights=[30, 20, 20, 10, 8, 6, 3, 3, 4, 1])[0]
     ip, host, mac = random.choice(LAN_CLIENTS)
     if kind == "lan_web":
         filterlog("allow_lan_web", IFACE["lan"], "pass", "in", "tcp", ip, random.choice(BENIGN_IPS),
@@ -213,6 +283,15 @@ def baseline_event():
         filterlog("allow_guest_web", IFACE["guest"], "pass", "in", "tcp", gip, random.choice(BENIGN_IPS), eport(), 443)
     elif kind == "dhcp":
         dhcp_ack(ip, host, mac, IFACE["lan"])
+    elif kind == "wifi":
+        if random.random() < 0.3:
+            ap_station(WIFI_GUEST, random.choice(["CONNECTED", "DISCONNECTED"]), GUEST_CLIENTS[0][2])
+        else:
+            ap_station(random.choice(WIFI_STAFF), random.choice(["CONNECTED", "CONNECTED", "DISCONNECTED"]), mac)
+    elif kind == "switch_port":
+        port = random.choice(SWITCH_PORTS)
+        switch_link(port, "down")
+        switch_link(port, "up")
     else:
         filterlog("allow_lan_web", IFACE["lan"], "pass", "in", "icmp", ip, "1.1.1.1")
 
@@ -277,7 +356,7 @@ def sc_blocked_category():
     # Unbound blocklist answers 0.0.0.0, so only the DNS queries show up - no connection follows
     ip = LAN_CLIENTS[2][0]  # LT-ANAN
     for _ in range(random.randint(10, 15)):
-        dns_query(ip, random.choice(BLOCKED_DOMAINS))
+        dns_blocked(ip, random.choice(BLOCKED_DOMAINS))
 
 
 def sc_dns_bypass():
@@ -295,9 +374,47 @@ def sc_vpn_login_ok():
     vpn_login(user, f"{random.choice([49, 58, 171])}.{random.randint(1, 254)}.{random.randint(1, 254)}.{random.randint(1, 254)}", ok=True)
 
 
+def sc_unknown_device():
+    # a personal laptop joins the Staff Wi-Fi and gets a lease from the unmapped pool; a Pi is plugged into a desk port
+    ip, host, mac = ROGUE_LAPTOP
+    for _ in range(random.randint(2, 4)):
+        ap_station(WIFI_STAFF[0], "POSSIBLE-PSK-MISMATCH", mac)  # guessing the Staff Wi-Fi password first
+    ap_station(WIFI_STAFF[0], "CONNECTED", mac)
+    dhcp_ack(ip, host, mac, IFACE["lan"])
+    switch_port_security(ROGUE_PI_MAC, SWITCH_PORTS[8])
+
+
+def sc_port_flap():
+    port = SWITCH_PORTS[7]
+    for _ in range(random.randint(5, 7)):
+        switch_link(port, "down")
+        switch_link(port, "up")
+
+
+def sc_netdev_bruteforce():
+    # someone on a Sales laptop guesses the switch and AP admin passwords
+    src = LAN_CLIENTS[2][0]
+    for _ in range(random.randint(5, 8)):
+        switch_login(random.choice(["admin", "cisco"]), src, ok=False)
+    for _ in range(random.randint(5, 8)):
+        ap_login("admin", src, ok=False)
+
+
+def sc_netdev_login_unusual():
+    # switch admin login from the office LAN instead of the management VLAN
+    switch_login("admin", LAN_CLIENTS[4][0], ok=True)
+
+
+def sc_netdev_config_change():
+    switch_login("admin", ADMIN_WS, ok=True)
+    switch_config("admin", ADMIN_WS)
+    ap_login("admin", ADMIN_WS, ok=True)
+
+
 SCENARIOS = [sc_port_scan, sc_gui_bruteforce, sc_admin_login_unusual, sc_config_change, sc_c2_beacon,
              sc_phishing_dns, sc_vpn_bruteforce, sc_guest_lateral, sc_ids_web_attack, sc_vpn_login_ok,
-             sc_blocked_category, sc_dns_bypass]
+             sc_blocked_category, sc_dns_bypass, sc_unknown_device, sc_port_flap, sc_netdev_bruteforce,
+             sc_netdev_login_unusual, sc_netdev_config_change]
 
 
 def play(names):

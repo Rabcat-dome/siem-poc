@@ -1,0 +1,11 @@
+[Unit]
+Description=SIEM: disk usage check of the data disk (OPS-03)
+
+[Timer]
+OnCalendar=*-*-* *:05:00 Asia/Bangkok
+Persistent=true
+RandomizedDelaySec=60
+Unit=siem-job@disk-check.service
+
+[Install]
+WantedBy=timers.target

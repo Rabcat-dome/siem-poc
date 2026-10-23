@@ -10,7 +10,7 @@ Exit code 1 if any case fails.
 
 Case format (see pipeline_cases.json):
   name         unique label
-  raw          full RFC5424 syslog line  OR  message (+ application_name, source, timestamp)
+  raw          full syslog line, RFC5424 or RFC3164 (switch/AP)  OR  message (+ application_name, source, timestamp)
   expect       {field: value}   subset match; numbers/bools compare by value, "*" = field must exist
   absent       [field, ...]     fields that must NOT be set
 """
@@ -31,14 +31,20 @@ DEFAULTS = {"source": "opnsense.poc.local", "application_name": "filterlog",
             "timestamp": "2026-10-23T10:00:00.000Z"}
 
 RFC5424 = re.compile(r"^<\d+>1 (?P<ts>\S+) (?P<host>\S+) (?P<app>\S+) \S+ \S+ (?:-|(?:\[[^\]]*\])+) ?(?P<msg>.*)$", re.S)
+# BSD syslog as switches and APs send it; Graylog keeps "host tag: text" as the message and sets no application_name
+RFC3164 = re.compile(r"^<\d+>[A-Z][a-z]{2} [ \d]\d \d\d:\d\d:\d\d (?P<host>\S+) (?P<rest>.*)$", re.S)
 
 
 def build_message(case, n):
     msg = dict(DEFAULTS)
-    if "raw" in case:
+    if "raw" in case and RFC3164.match(case["raw"].strip()):
+        m = RFC3164.match(case["raw"].strip())
+        del msg["application_name"]
+        msg.update(source=m["host"], message=f"{m['host']} {m['rest']}")
+    elif "raw" in case:
         m = RFC5424.match(case["raw"].strip())
         if not m:
-            raise ValueError("raw is not RFC5424: <pri>1 TS HOST APP PID MSGID SD MSG")
+            raise ValueError("raw is neither RFC5424 (<pri>1 TS HOST APP PID MSGID SD MSG) nor RFC3164 (<pri>Mmm dd hh:mm:ss HOST MSG)")
         # Graylog renders a DateTime as ISO-8601 with exactly 3 fractional digits; mimic that
         ts = re.sub(r"(?:\.(\d+))?(Z|[+-]\d\d:\d\d)$",
                     lambda t: "." + ((t[1] or "") + "000")[:3] + t[2], m["ts"])

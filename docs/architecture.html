@@ -327,7 +327,7 @@
           <rect x="652" y="158" width="20" height="12" rx="2" fill="transparent" stroke="rgba(79,93,117,0.50)" stroke-width="0.8"/>
           <text x="662" y="167" fill="#4f5d75" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">DB</text>
           <text x="706" y="184" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">OpenSearch</text>
-          <text x="706" y="198" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">10 streams · index</text>
+          <text x="706" y="198" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">13 streams · index</text>
 
           <!-- Lookup tables (store) -->
           <rect x="436" y="268" width="168" height="56" rx="6" fill="#f5f5f5"/>
@@ -343,7 +343,7 @@
           <rect x="652" y="274" width="28" height="12" rx="2" fill="transparent" stroke="rgba(191,69,32,0.50)" stroke-width="0.8"/>
           <text x="666" y="283" fill="#bf4520" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">RULE</text>
           <text x="706" y="300" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Alert engine</text>
-          <text x="706" y="314" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">14 event defs</text>
+          <text x="706" y="314" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">20 event defs</text>
 
           <!-- Notifications (external) -->
           <rect x="824" y="268" width="140" height="56" rx="6" fill="#f5f5f5"/>
@@ -489,7 +489,7 @@ c2-server · count()=1</pre>
           <div class="card-header"><span class="card-dot soft"></span><h3><small>Next phase</small>มุมมองที่ควรเพิ่ม</h3></div>
           <ul>
             <li>Login สำเร็จหลัง fail หลายครั้ง (correlation)</li>
-            <li>Switch/AP: MAC ใหม่ที่ไม่อยู่ใน DHCP static mapping</li>
+            <li>Switch/AP: เปลี่ยน log จำลองเป็นของจริง (NET-03/04, IAM-05/06, CHG-02 พร้อมแล้ว)</li>
             <li>IDS alert เดิมซ้ำจากเครื่องเดิม (เครื่องที่น่าจะติดเชื้อ)</li>
           </ul>
           <p class="meta">Phase 1–2 ตาม Q8, Q9</p>
@@ -513,7 +513,7 @@ c2-server · count()=1</pre>
             <tr><td>แจ้งเตือน Email</td><td class="ok">Mailpit <code>:8025</code></td><td>SMTP relay ของบริษัท</td><td>แก้ <code>GRAYLOG_TRANSPORT_EMAIL_*</code></td></tr>
             <tr><td>แจ้งเตือน Chat</td><td class="ok">Webhook receiver <code>:8088</code></td><td class="next">ไม่ใช้ในเฟสนี้ (Q4: Email อย่างเดียว)</td><td>เพิ่ม LINE OA / Teams ภายหลังได้โดยไม่ต้องแก้ alert</td></tr>
             <tr><td>Ticketing</td><td class="next">ไม่มี</td><td>Jira / GLPI / ServiceNow ผ่าน HTTP notification</td><td>เก็บประวัติ incident (A.5.24–A.5.26)</td></tr>
-            <tr><td>แหล่ง log อื่น</td><td class="next">ไม่มี</td><td>Switch / Wi-Fi AP ผ่าน syslog <code>:1514</code> (Q9)</td><td>Phase 2 · ต้องเขียน rule ตามยี่ห้อ</td></tr>
+            <tr><td>แหล่ง log อื่น</td><td class="next">ไม่มี</td><td>Switch / Wi-Fi AP ผ่าน syslog <code>:1514</code> (Q9)</td><td>POC จำลองแล้ว (Cisco IOS-style, hostapd) · Phase 2 แก้ rule ตามยี่ห้อจริง</td></tr>
           </tbody>
         </table>
       </div>

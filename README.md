@@ -10,15 +10,15 @@ POC สำหรับเตรียมตรวจ ISO/IEC 27001:2022 โด�
 flowchart LR
   subgraph SRC[Log sources]
     FW[OPNsense firewall]
-    SIM[Log simulator<br/>every 5s]:::poc
+    SIM[Log simulator<br/>OPNsense · switch · AP<br/>every 5s]:::poc
     NAS[(Synology NAS<br/>archive)]
   end
   subgraph GL[Graylog SIEM - docker compose]
     IN[Syslog input :1514]
     PIPE[Pipeline<br/>parse · enrich · route]:::focal
     LUT[(Lookup tables<br/>asset · zone · rule · TI · web)]
-    OS[(OpenSearch<br/>10 streams)]
-    AL[Alert engine<br/>14 event definitions]:::focal
+    OS[(OpenSearch<br/>13 streams)]
+    AL[Alert engine<br/>20 event definitions]:::focal
   end
   FW -- syslog --> IN
   FW -- syslog copy --> NAS
@@ -32,6 +32,8 @@ flowchart LR
 ```
 
 > OPNsense เป็น FreeBSD จึงรันใน Docker ไม่ได้ POC นี้ใช้ **simulator** ส่ง log รูปแบบเดียวกับ OPNsense จริง (RFC5424: filterlog, suricata, audit, openvpn, dhcpd, unbound) ทำให้ pipeline เดียวกันใช้กับเครื่องจริงได้ทันที
+>
+> สามอย่างที่ยังไม่รู้รูปแบบจริงจึง**จำลองไว้ก่อน**: switch (แบบ Cisco IOS เช่น `%LINK-3-UPDOWN`), Wi-Fi AP (hostapd + dropbear) ซึ่งส่งแบบ RFC3164 เหมือนอุปกรณ์เครือข่ายทั่วไป และบรรทัดที่ Unbound ตอบจาก blocklist (`log-local-actions`) ต้องเทียบกับเครื่องจริงก่อนขึ้นระบบ (REQUIREMENTS หัวข้อ 9)
 
 ## เริ่มใช้งาน
 
@@ -66,6 +68,9 @@ threat_indicator:true
 event_type:gui_login_failure
 web_policy:block
 web_category:social
+event_type:dns_blocked
+mac_known:false AND src_zone:LAN\-Office
+event_category:(switch OR wifi)
 ```
 
 **ดู alert:** Graylog › Alerts (หรือดูที่ Mailpit/Webhook) alert ถูกประเมินทุก 1 นาที ส่วน IAM-03 (admin login นอกเวลา) จะยิงเฉพาะช่วง 19:00–07:59 เวลาไทย
@@ -76,7 +81,7 @@ web_category:social
 docker compose run --rm --no-deps generator python /app/opnsense_simulator.py --play all
 ```
 
-หรือเลือกเฉพาะบางตัว เช่น `--play port_scan c2_beacon` (มี `port_scan`, `gui_bruteforce`, `admin_login_unusual`, `config_change`, `c2_beacon`, `phishing_dns`, `vpn_bruteforce`, `guest_lateral`, `ids_web_attack`, `vpn_login_ok`, `blocked_category`, `dns_bypass`)
+หรือเลือกเฉพาะบางตัว เช่น `--play port_scan c2_beacon` (มี `port_scan`, `gui_bruteforce`, `admin_login_unusual`, `config_change`, `c2_beacon`, `phishing_dns`, `vpn_bruteforce`, `guest_lateral`, `ids_web_attack`, `vpn_login_ok`, `blocked_category`, `dns_bypass`, `unknown_device`, `port_flap`, `netdev_bruteforce`, `netdev_login_unusual`, `netdev_config_change`)
 
 **ทดสอบ alert "log หาย" (OPS-01):**
 
@@ -96,11 +101,22 @@ docker compose stop generator
    - **ติ๊ก RFC5424**
 2. Firewall rule ที่ต้องการให้เห็น traffic ต้องเปิด "Log packets that are handled by this rule"
 3. Intrusion Detection › Administration › เปิด **Enable syslog alerts**
-4. Unbound DNS › Advanced › เปิด **Log Queries** (ถ้าต้องการ DNS)
+4. Unbound DNS › Advanced › เปิด **Log Queries** (ถ้าต้องการ DNS) และถ้ามีตัวเลือก log ของ local action ให้เปิดด้วย แล้วลอง query โดเมนใน blocklist ดูว่า log ที่ได้ตรงกับ rule `19b_parse_dns_blocked` หรือไม่ ถ้าเครื่องจริงไม่ log query ที่ถูกบล็อกเลย ให้เปลี่ยน `DNS_BLOCKED` เป็น `web_policy:block` ตาม REQUIREMENTS หัวข้อ 9
 5. แก้ไฟล์ใน `graylog/lookup/` ให้ตรงกับบริษัท (asset จริง, subnet จริง, rule ID จริงซึ่งดูได้จาก Firewall › Log Files › Live View)
    - `fw_rules.csv` คอลัมน์ `tag`: ใส่ `dns-bypass` ให้ rule ที่บล็อก DoT (853), DNS ออกนอก (53) และ DoH resolver เพื่อให้ WEB-02 ทำงาน
    - `web_categories.csv`: ใช้ domain ชุดเดียวกับ blocklist ที่เปิดใน Unbound (policy `block`) และหมวดที่แค่ monitor (policy `monitor`) ใส่ระดับ domain หลัก แล้ว subdomain จะ match ให้เอง
 6. เทียบ log จริงกับ regex ใน `graylog/pipeline/*.rule` ถ้ารูปแบบต่างจากที่ simulator ส่ง (เช่นใช้ dnsmasq แทน ISC dhcpd) ให้แก้ rule แล้วรัน provisioner ใหม่
+
+## ต่อ switch และ Wi-Fi AP
+
+ยังไม่ทราบรุ่น (Q9) simulator จึงส่ง log จาก `sw-core01` และ `ap-office01` แทน ตอนได้อุปกรณ์จริง:
+
+1. ตั้ง syslog ของ switch และ AP ไปที่ SIEM port `1514` (production `514`) และให้ IP management อยู่ใน VLAN 99
+2. ส่ง log จริงเข้ามาแล้วดูใน Search ว่าข้อความหน้าตาอย่างไร (RFC3164 ไม่มี `application_name` Graylog เก็บ "hostname tag: ข้อความ" ไว้ใน `message`)
+3. แก้ regex ใน `graylog/pipeline/6*.rule` ให้ตรงกับรุ่นจริง โดยตั้ง field ชื่อเดิม (`event_type`, `net_device`, `net_port`, `src_mac`, `user`, `src_ip`) เพื่อให้ alert และ dashboard ใช้ได้ต่อ แล้วเพิ่มเคสใน `tests/pipeline_cases.json` (ใส่บรรทัดจริงใน `raw` ได้เลย runner รองรับ RFC3164)
+4. ใส่ชื่อ interface ของแต่ละ SSID ใน `graylog/lookup/wifi_ssids.csv` (เช่น UniFi ใช้ `ath0`, OpenWrt ใช้ `wlan0`, `wlan0-1`)
+
+NET-03 รู้ว่าเครื่องไหนเป็นของบริษัทจาก `assets_mac.csv` ซึ่ง `tools/sync_assets.py` สร้างจาก MAC ใน DHCP static mapping พร้อมกับ `assets.csv`
 
 ## ยิง traffic จริงผ่าน OPNsense ทดสอบ
 
@@ -132,7 +148,7 @@ python3 traffic-generator/traffic_generator.py --dns 192.168.1.1 --play all
 
 ## Dashboards (FR-11)
 
-provisioner สร้าง 4 dashboard ให้อัตโนมัติ (Graylog › Dashboards) ค่าตั้งต้นแสดง 24 ชั่วโมงล่าสุด
+provisioner สร้าง 5 dashboard ให้อัตโนมัติ (Graylog › Dashboards) ค่าตั้งต้นแสดง 24 ชั่วโมงล่าสุด
 
 | Dashboard | แสดงอะไร |
 |---|---|
@@ -140,6 +156,7 @@ provisioner สร้าง 4 dashboard ให้อัตโนมัติ (Gr
 | SIEM - Firewall & network | block เทียบ pass ตามเวลา · source และ port ที่ถูกบล็อกมากที่สุด · ตาราง zone ต้นทาง × ปลายทาง · Guest พยายามเข้าโซนภายใน (A.8.22) |
 | SIEM - Identity & admin | login หน้า GUI สำเร็จ/ล้มเหลว · login ล้มเหลวแยกตาม IP/user · VPN login ล้มเหลว · ตาราง config change ล่าสุด |
 | SIEM - Web filtering & threat | หมวดที่บล็อกและหมวดที่ monitor · เครื่องที่เข้าหมวดต้องห้าม · การเลี่ยง DNS filtering · IDS signature · threat intel hits |
+| SIEM - Switch & Wi-Fi | การต่อ Wi-Fi ตาม SSID · เครื่องที่ไม่อยู่ในทะเบียน asset · ใส่รหัส Wi-Fi ผิด · port ที่ link down · admin login และ config change ของ switch/AP |
 
 ถ้าแก้นิยาม dashboard ใน `provision.py` แล้วรัน provisioner ใหม่ dashboard จะถูกแทนที่ทั้งชุด (รวมถึงการแก้ใน UI) ถ้าไม่ได้แก้นิยาม จะไม่แตะของเดิม
 
@@ -167,20 +184,26 @@ docker compose run --rm tools /tools/monthly_report.py --last-days 1 --email-to 
 
 ไม่ใส่ `--last-days` จะสรุปเดือนก่อนหน้า ตั้ง cron วันที่ 1 ของทุกเดือนได้ ควรตั้ง `REPORT_USER=it-analyst` ใน `.env` เมื่อสร้าง user แล้ว
 
+**พื้นที่ disk (Q6, OPS-03):** ไม่ได้วัด EPS ก่อนขึ้นระบบ [tools/disk_check.py](tools/disk_check.py) จึงตรวจ disk ทุกชั่วโมงแล้วส่งผลเข้า Graylog ถ้าใช้ถึง `DISK_WARN_PCT` (75%) จะเกิด OPS-03 ให้ขยาย disk ก่อน OpenSearch หยุดเขียนที่ 95% ลองยิงใน POC ได้ด้วย `--warn 1`
+
+```bash
+docker compose run --rm tools /tools/disk_check.py / --warn 1 --syslog graylog:1514
+```
+
 ## ทดสอบ pipeline กับ log ตัวอย่าง
 
-[tests/run_pipeline_tests.py](tests/run_pipeline_tests.py) ส่ง log ตัวอย่างใน [tests/pipeline_cases.json](tests/pipeline_cases.json) ผ่าน pipeline simulator ของ Graylog แล้วเทียบ field ที่ได้ (ตอนนี้มี 37 เคส ครอบคลุมทุก parse rule, การ enrich, filterlog IPv6 และ DHCP แบบ dnsmasq)
+[tests/run_pipeline_tests.py](tests/run_pipeline_tests.py) ส่ง log ตัวอย่างใน [tests/pipeline_cases.json](tests/pipeline_cases.json) ผ่าน pipeline simulator ของ Graylog แล้วเทียบ field ที่ได้ (ตอนนี้มี 52 เคส ครอบคลุมทุก parse rule, การ enrich, filterlog IPv6, DHCP แบบ dnsmasq, query ที่ถูก blocklist, switch, Wi-Fi AP และ disk check)
 
 ```bash
 python3 tests/run_pipeline_tests.py            # ทุกเคส (exit 1 ถ้ามีเคสไม่ผ่าน)
 python3 tests/run_pipeline_tests.py -v ipv6    # เฉพาะเคสที่ชื่อมีคำว่า ipv6 พร้อมแสดง field ทั้งหมด
 ```
 
-เมื่อได้ log จริงจาก OPNsense: copy เคสที่ใกล้เคียง ใส่บรรทัด syslog เต็มใน `raw` แล้วใส่ field ที่คาดหวังใน `expect` (`"*"` = ต้องมี field นี้) และ field ที่ต้องไม่มีใน `absent` ถ้าไม่ผ่าน ให้แก้ regex หรือ CSV index ใน `.rule` แล้วโหลด rule ใหม่ด้วย `docker compose run --rm provisioner` ก่อนรันซ้ำ
+เมื่อได้ log จริงจาก OPNsense, switch หรือ AP: copy เคสที่ใกล้เคียง ใส่บรรทัด syslog เต็มใน `raw` (RFC5424 หรือ RFC3164) แล้วใส่ field ที่คาดหวังใน `expect` (`"*"` = ต้องมี field นี้) และ field ที่ต้องไม่มีใน `absent` ถ้าไม่ผ่าน ให้แก้ regex หรือ CSV index ใน `.rule` แล้วโหลด rule ใหม่ด้วย `docker compose run --rm provisioner` ก่อนรันซ้ำ
 
 ## Sync ข้อมูลจาก OPNsense
 
-**Asset (Q5):** [tools/sync_assets.py](tools/sync_assets.py) สร้าง `assets.csv` จาก DHCP static mapping ของ OPNsense แล้วรวมกับ `graylog/lookup/assets_static.csv` (server, firewall และเครื่องที่ไม่ได้รับ IP จาก DHCP) ใส่ข้อมูลเจ้าของไว้ใน description ของ static mapping ตามรูปแบบ `owner=somchai.k;dept=Finance;crit=medium`
+**Asset (Q5):** [tools/sync_assets.py](tools/sync_assets.py) สร้าง `assets.csv` จาก DHCP static mapping ของ OPNsense แล้วรวมกับ `graylog/lookup/assets_static.csv` (server, firewall และเครื่องที่ไม่ได้รับ IP จาก DHCP) ใส่ข้อมูลเจ้าของไว้ใน description ของ static mapping ตามรูปแบบ `owner=somchai.k;dept=Finance;crit=medium` และเขียน `assets_mac.csv` (MAC → เครื่อง/เจ้าของ) ให้ NET-03 ด้วย ไฟล์นี้แยกออกมาเพราะ lookup แบบ CSV ของ Graylog ใช้ไม่ได้ถ้ามี key ซ้ำ รวมถึง key ว่างของเครื่องที่ไม่มี MAC
 
 ```bash
 OPNSENSE_URL=https://192.168.99.1 OPNSENSE_KEY=... OPNSENSE_SECRET=... python3 tools/sync_assets.py --backend kea --insecure --dry-run
@@ -259,6 +282,7 @@ sudo deploy/install.sh
 | `siem-manifest-verify.timer` | วันที่ 1 เวลา 02:00 | ตรวจ archive ทั้งหมด (ไม่ผ่านจะเกิด OPS-02) |
 | `siem-monthly-report.timer` | วันที่ 1 เวลา 07:00 | RPT-01 ของเดือนก่อนทาง email |
 | `siem-backup.timer` | ทุกวัน 03:00 | [backup](deploy/backup.sh): MongoDB, config (เข้ารหัสด้วย `BACKUP_PASSPHRASE`), `config.xml` ของ OPNsense |
+| `siem-disk-check.timer` | ทุกชั่วโมง นาทีที่ 5 | [disk check](tools/disk_check.py) ของ `DISK_CHECK_PATHS` (ค่าตั้งต้น `/var/lib/docker`) ถึง `DISK_WARN_PCT` จะเกิด OPS-03 |
 
 รัน job เองได้ด้วย `deploy/siem-job.sh <ชื่อ job>` และดู log ด้วย `journalctl -u 'siem-job@*'`
 
@@ -290,16 +314,17 @@ docker compose -f docker-compose.prod.yml up -d
 docker-compose.yml            # POC: mongodb, opensearch, graylog, provisioner, generator, mailpit, webhook, tools
 docker-compose.prod.yml       # production: graylog (HTTPS), opensearch, mongodb, provisioner
 deploy/                       # host firewall (DOCKER-USER), job runner, systemd timers / cron, backup, install.sh
-generator/opnsense_simulator.py  # ยิง log แบบ OPNsense ทุก 5 วินาที + attack scenarios
+generator/opnsense_simulator.py  # ยิง log แบบ OPNsense + switch + Wi-Fi AP ทุก 5 วินาที + attack scenarios
 graylog/pipeline/*.rule       # parse (stage 0) → enrich (stage 1) → route (stage 2)
 graylog/pipeline/opnsense.pipeline
-graylog/lookup/*.csv          # asset inventory, network zones, firewall rules (+ tag), threat intel, web categories
+graylog/lookup/*.csv          # asset inventory (by IP + by MAC), network zones, firewall rules (+ tag), threat intel, web categories, Wi-Fi SSIDs
 provisioner/provision.py      # สร้างทุกอย่างผ่าน Graylog REST API (รันซ้ำได้)
 webhook/receiver.py           # รับ HTTP notification แทน LINE/Teams/ticketing
 traffic-generator/            # traffic จริงผ่าน OPNsense ทดสอบ + ตรวจว่า control บล็อกจริง
 tools/log_manifest.py         # SHA-256 manifest ของ log archive (NFR-11)
 tools/monthly_report.py       # รายงานรายเดือน RPT-01
-tools/sync_assets.py          # DHCP static mapping ของ OPNsense -> assets.csv
+tools/disk_check.py           # disk usage ของเครื่อง SIEM -> OPS-03 (แทนการวัด EPS)
+tools/sync_assets.py          # DHCP static mapping ของ OPNsense -> assets.csv + assets_mac.csv
 tools/sync_web_categories.py  # แหล่ง blocklist -> web_categories.csv
 tests/                        # ชุดทดสอบ pipeline rule ผ่าน Graylog simulator
 tools/gen_tls_certs.sh        # CA + cert สำหรับ syslog over TLS
@@ -335,6 +360,12 @@ docker compose run --rm provisioner
 | WEB-02 | พยายามเลี่ยง DNS filtering (DoT 853, DNS ภายนอก, DoH) | Medium |
 | OPS-01 | OPNsense หยุดส่ง log 5 นาที | High |
 | OPS-02 | ตรวจ SHA-256 ของ log archive ไม่ผ่าน (ไฟล์ถูกแก้หรือหาย) | High |
+| OPS-03 | disk ของ SIEM ใช้ถึง 75% (แจ้งซ้ำวันละครั้ง) | Medium |
+| NET-03 | เครื่องที่ไม่อยู่ในทะเบียน asset ได้ DHCP / ต่อ Wi-Fi Staff หรือถูก port security บล็อก | Medium |
+| NET-04 | port ของ switch link down ≥ 5 ครั้ง / 10 นาที | Low |
+| IAM-05 | Brute force หน้า admin ของ switch/AP | High |
+| IAM-06 | Admin login switch/AP จากนอก Management zone | Medium |
+| CHG-02 | Config ของ switch/AP ถูกแก้ไข | Low |
 
 High ส่งทั้ง Email และ Webhook ส่วน Medium/Low ส่ง Email อย่างเดียว รายละเอียดและ ISO mapping อยู่ใน [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md#6-alert-use-cases-ทำงานใน-poc-แล้ว)
 
@@ -344,6 +375,7 @@ High ส่งทั้ง Email และ Webhook ส่วน Medium/Low ส�
 - OpenSearch ปิด security plugin (ไม่ได้เปิด port ออกนอก docker network) และ UI ของ POC เป็น HTTP (production เป็น HTTPS ดูหัวข้อ "Deploy production")
 - Identity (IP → ผู้ใช้) มาจาก CSV ซึ่ง sync จาก DHCP static mapping ได้ แต่ยังไม่ได้ทดสอบกับ OPNsense จริง
 - filterlog IPv6 และ DHCP แบบ dnsmasq ทดสอบผ่าน simulator API เท่านั้น ยังไม่เคยเจอ traffic จริง
+- log ของ switch, Wi-Fi AP และ query ที่ Unbound ตอบจาก blocklist เป็นรูปแบบที่สมมติไว้ (ยังไม่ทราบรุ่นอุปกรณ์และยังไม่เห็น log จริง) ต้องเทียบกับของจริงก่อนใช้ NET-03/04, IAM-05/06, CHG-02 และ WEB-01
 
 ## ปิด / ล้างข้อมูล
 

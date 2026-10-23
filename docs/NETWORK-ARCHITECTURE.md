@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | ประเภทเอกสาร | เอกสารส่งมอบ (Architecture & Implementation Guide) |
-| สถานะ | Draft v0.1 · 2026-10-23 |
+| สถานะ | Draft v0.2 · 2026-10-23 (ISP เป็น ADSL ไม่มี fixed IP, NIC น่าจะเป็น Intel, switch/AP ยังไม่ทราบรุ่น) |
 | เกี่ยวข้อง | [REQUIREMENTS.md](REQUIREMENTS.md) (Q1–Q16), [architecture.html](architecture.html) (SIEM integration), [README](../README.md) (POC และการต่อ log) |
 
 OPNsense ต้องเป็น**ทางผ่านเดียว (single choke point)** ของ traffic ทุกอย่างระหว่างเครือข่ายสำนักงานกับ internet และระหว่าง zone ภายใน ถ้ามีทางอ้อม เช่น Wi-Fi ของ router ISP หรือเครื่องที่เสียบตรงกับ ONT traffic นั้นจะไม่ถูกกรองและไม่มี log ทำให้ตอบไม่ได้ว่าใครทำอะไร จากไหน ไปไหน ซึ่งเป็นโจทย์หลักของโปรเจกต์นี้
@@ -26,7 +26,7 @@ OPNsense ต้องเป็น**ทางผ่านเดียว (single 
 
 | หน้าที่ | ปัจจุบัน (router บ้าน) | เป้าหมาย |
 |---|---|---|
-| ต่อ internet | router ISP | ONT/router ISP (bridge หรือ DMZ) |
+| ต่อ internet | router ISP | modem/router ADSL ของ ISP (bridge หรือ DMZ) + DDNS |
 | Router, NAT, firewall | router ISP | OPNsense |
 | แจก IP (DHCP) | router ISP | OPNsense แยกตาม VLAN + static mapping |
 | DNS | DNS ของ ISP | Unbound บน OPNsense + blocklist (FR-16) |
@@ -39,7 +39,7 @@ OPNsense ต้องเป็น**ทางผ่านเดียว (single 
 
 ```mermaid
 flowchart TB
-  NET((Internet)) --> ONT["ONT / router ของ ISP<br/>bridge หรือ DMZ · ปิด Wi-Fi"]
+  NET((Internet)) --> ONT["modem/router ADSL ของ ISP<br/>bridge หรือ DMZ · ปิด Wi-Fi · DDNS"]
   ONT -->|"WAN · igb0"| FW["OPNsense<br/>router · firewall · DHCP · DNS · IDS"]
   FW -->|"LAN · igb1 · trunk 802.1Q"| SW["Managed switch"]
   SW -->|"access VLAN 10"| PC["PC พนักงาน"]
@@ -112,21 +112,36 @@ flowchart LR
 | Suricata | signature ของการโจมตี | อะไร (THR-01) |
 | DHCP | IP ↔ MAC ↔ hostname | ใคร (เสริม static mapping) |
 | Audit / OpenVPN | admin login, config change, VPN user | ใคร (IAM-01–04, CHG-01) |
+| Switch | port up/down, port security, admin login, config change | เครื่องแปลกปลอมเสียบ port, ใครแก้ switch (NET-03/04, IAM-05/06, CHG-02) |
+| Wi-Fi AP | MAC ไหนต่อ SSID ไหน, ใส่รหัส Wi-Fi ผิด, admin login | ใคร (MAC → เจ้าของ), เครื่องแปลกปลอมใน Staff Wi-Fi (NET-03) |
+
+switch และ AP ยังไม่ทราบรุ่น POC จึงจำลอง log แบบ Cisco IOS (switch) และ hostapd/dropbear (AP) ไว้ก่อน (REQUIREMENTS Q9) เมื่อได้รุ่นจริงให้แก้ parse rule ใน `graylog/pipeline/6*.rule` และชื่อ interface ของ SSID ใน `graylog/lookup/wifi_ssids.csv`
 
 **จุดตัดสินใจเชิง architecture: Suricata ฟังที่ interface ไหน** ถ้าฟังที่ WAN จะเห็น traffic หลัง NAT เป็น IP ของ firewall เอง alert จึงบอกไม่ได้ว่าเครื่องไหนในออฟฟิศ ควรเปิดบน VLAN ภายใน (อย่างน้อย Office และ Guest) เพื่อให้ IDS alert มี IP ภายในสำหรับผูกกับเจ้าของเครื่อง แลกกับภาระ CPU ที่เพิ่มขึ้นตามจำนวน interface
 
 ## 7. การต่อกับ ISP (decision record)
 
-| | ทางเลือก A: Bridge + PPPoE (แนะนำ) | ทางเลือก B: router ISP + DMZ |
+ข้อมูลจริง (2026-10-23): internet เป็น **ADSL** public IP **ไม่ fixed** (เปลี่ยนเมื่อต่อใหม่) แต่ทำ **DDNS** ได้
+
+| | ทางเลือก A: modem เป็น bridge + OPNsense dial PPPoE | ทางเลือก B: router ADSL + DMZ (แนะนำให้เริ่ม) |
 |---|---|---|
-| วิธี | ให้ ISP เปลี่ยน ONT เป็น bridge แล้ว OPNsense dial PPPoE | ONT เป็น router เหมือนเดิม ตั้ง DMZ ชี้ไปที่ WAN ของ OPNsense |
-| สิ่งที่ต้องมี | username/password PPPoE จาก ISP | ไม่ต้องขอ |
+| วิธี | ตั้ง modem ADSL เป็น bridge แล้วให้ OPNsense dial PPPoE (Interfaces › WAN › IPv4 = PPPoE) | router ADSL dial เองเหมือนเดิม ตั้ง DMZ ชี้ไปที่ WAN ของ OPNsense |
+| สิ่งที่ต้องมี | username/password PPPoE จาก ISP และ modem ที่ทำ bridge ได้ | ไม่ต้องขอ |
 | NAT | ชั้นเดียว | 2 ชั้น (double NAT) |
+| DDNS | plugin `os-ddclient` บน OPNsense อ่าน public IP จาก interface PPPoE ได้ตรง | ใช้ DDNS ของ router ADSL ต่อไป (หรือ `os-ddclient` แบบตรวจ IP ผ่านเว็บ เพราะ WAN ของ OPNsense เป็น IP ภายใน) |
 | VPN / port forward | ตรงไปตรงมา | ทำได้ผ่าน DMZ แต่ debug ยากกว่า |
-| log | OPNsense เห็น IP ภายนอกจริง | เหมือนกัน (DMZ ส่งต่อทุก port) |
+| log | OPNsense เห็น public IP จริง และเห็นเมื่อ IP เปลี่ยน | WAN ของ OPNsense เป็น IP ภายในของ router (เช่น 192.168.1.x) |
 | ต้องตั้งเพิ่ม | ไม่มี | เอาติ๊ก "Block private networks" ที่ WAN ออก และ subnet ภายในต้องไม่ซ้ำกับของ router |
 
-**ข้อเสนอ:** เริ่มด้วยทางเลือก B เพื่อเปลี่ยนระบบได้เร็วและถอยกลับง่าย พอระบบนิ่งแล้วค่อยขอ ISP เปลี่ยนเป็นทางเลือก A ในรอบ maintenance ถัดไป **[ต้องยืนยัน: รุ่น ONT, ISP, มี static public IP หรือไม่]**
+**ข้อเสนอ:** เริ่มด้วยทางเลือก B เพราะ router ADSL ทำ DDNS อยู่แล้ว เปลี่ยนระบบได้เร็วและถอยกลับง่าย พอระบบนิ่งแล้วค่อยย้ายไปทางเลือก A ในรอบ maintenance ถัดไป
+
+**ผลจากการที่ public IP ไม่ fixed**
+
+- VPN client ต้องตั้งปลายทางเป็นชื่อ DDNS ไม่ใช่ IP เมื่อ IP เปลี่ยน session จะหลุดแล้วต่อใหม่ได้เมื่อ DNS อัปเดต จึงควรตั้ง TTL ของชื่อ DDNS ให้สั้น
+- rule หรือ NAT ที่อ้าง IP ของ WAN ให้ใช้ "WAN address" ของ OPNsense แทนการพิมพ์ IP
+- POC ใช้ `203.0.113.10` เป็น IP ของ WAN แบบ fix (`network_zones.csv` zone `WAN-Edge` และ `assets.csv`) ซึ่งใช้กับเครื่องจริงไม่ได้ ให้ลบแถวนี้ออก traffic ขาเข้าที่ WAN จะแสดง `dst_zone` เป็น `Internet` แต่ยังแยกได้จาก `fw_interface`
+- ถ้าหน่วยงานถามว่า "public IP นี้ ณ เวลานั้นเป็นของใคร" (พ.ร.บ.คอมพิวเตอร์) บริษัทต้องรู้ว่าตอนนั้นใช้ IP อะไร ISP มีบันทึกนี้ แต่ควรให้ OPNsense ส่ง log ของ PPPoE และ ddclient เข้า SIEM ด้วย เพื่อเก็บประวัติ IP ไว้ตาม retention (ยังไม่มี parse rule เพราะต้องรอรูปแบบ log จริง และจะเห็นชัดในทางเลือก A)
+- upload ของ ADSL ต่ำ VPN จากภายนอกจึงช้า ส่วน syslog เข้า SIEM อยู่ใน LAN ไม่ได้รับผลกระทบ
 
 ## 8. Hardware และการตั้งค่าเครื่อง
 
@@ -137,7 +152,7 @@ flowchart LR
 | CPU | x86-64 4 core มี AES-NI | VPN, TLS และ Suricata ใช้ CPU |
 | RAM | 8 GB | Suricata กับ ruleset ET Open ใช้หน่วยความจำมาก |
 | Disk | SSD 120 GB | log บนเครื่องและ config backup (log หลักอยู่ที่ SIEM) |
-| NIC | Intel 2 port ขึ้นไป (เช่น i210/i211/i225) | ต้องรองรับ netmap จึงเปิด IPS ได้ (Q8) ส่วน Realtek มักไม่เสถียร |
+| NIC | Intel 2 port ขึ้นไป (เช่น i210/i211/i225) | ต้องรองรับ netmap จึงเปิด IPS ได้ (Q8) ส่วน Realtek มักไม่เสถียร · เครื่องปัจจุบันน่าจะเป็น Intel ยืนยันที่ Interfaces › Overview: ชื่อ `igb`/`igc`/`em`/`ix` = Intel, `re` = Realtek |
 | ไฟ | ต่อ UPS ร่วมกับ switch และเครื่อง SIEM | ไฟกระพริบแล้วทุกคนจะออก internet ไม่ได้ (R-03) |
 
 ### 8.2 BIOS / UEFI (firmware)
@@ -161,7 +176,7 @@ flowchart LR
 | AP | SSID "Staff" (WPA2/WPA3) | – | 10 |
 | AP | SSID "Guest" (client isolation เปิด) | – | 30 |
 
-IP สำหรับ management ของ switch และ AP ให้อยู่ใน VLAN 99 เท่านั้น **[ต้องยืนยัน: ยี่ห้อ/รุ่นของ switch และ AP ว่ารองรับ VLAN ต่อ SSID (Q9)]**
+IP สำหรับ management ของ switch และ AP ให้อยู่ใน VLAN 99 เท่านั้น และตั้งให้ส่ง syslog ไปที่ SIEM (POC ใช้ 192.168.99.2 = switch, 192.168.99.3 = AP) **[ต้องยืนยัน: ยี่ห้อ/รุ่นของ switch และ AP ว่ารองรับ VLAN ต่อ SSID (Q9) ระหว่างนี้ POC จำลอง log ไว้แล้ว]**
 
 ## 9. ขั้นตอนติดตั้ง
 
@@ -175,8 +190,9 @@ IP สำหรับ management ของ switch และ AP ให้อย�
 8. Firewall rule: ใส่ rule ตามหัวข้อ 5 เรียงจากเฉพาะเจาะจงไปทั่วไป และเปิด logging ให้ rule ที่ข้าม zone ทุกข้อ
 9. System › Settings › Administration: ให้ GUI ฟังเฉพาะ interface Management และเปิด HTTPS
 10. Intrusion Detection: เปิด IDS บน interface ภายใน (หัวข้อ 6) และเปิด syslog alerts (Q8)
-11. Remote logging ไป SIEM ผ่าน TLS 6514 ตาม README หัวข้อ "ก่อนขึ้นระบบจริง"
-12. ตั้ง backup config อัตโนมัติไป Synology ทุกวัน (Q12)
+11. Remote logging ไป SIEM ผ่าน TLS 6514 ตาม README หัวข้อ "ก่อนขึ้นระบบจริง" และตั้ง switch / AP ให้ส่ง syslog ไปที่ SIEM port 514
+12. Dynamic DNS: ทางเลือก B ใช้ DDNS ของ router ADSL ต่อไป ส่วนทางเลือก A ติดตั้ง plugin `os-ddclient` แล้วตั้งที่ Services › Dynamic DNS
+13. ตั้ง backup config อัตโนมัติไป Synology ทุกวัน (Q12)
 
 ## 10. แผนเปลี่ยนระบบ (cutover)
 
@@ -213,9 +229,9 @@ IP สำหรับ management ของ switch และ AP ให้อย�
 
 ## 13. ข้อสมมติและข้อมูลที่ต้องยืนยัน
 
-- รุ่น ONT และ ISP, ทำ bridge ได้หรือไม่, มี static public IP หรือไม่ (หัวข้อ 7)
+- ~~รุ่น ONT และ ISP, มี static public IP หรือไม่~~ ได้ข้อมูลแล้ว: ADSL, IP ไม่ fixed, ทำ DDNS ได้ (หัวข้อ 7) · เหลือยืนยันว่า modem ทำ bridge ได้และมี username/password PPPoE (เฉพาะทางเลือก A)
 - ยี่ห้อ/รุ่นของ switch และ AP ว่ารองรับ 802.1Q และ VLAN ต่อ SSID (หัวข้อ 8.3, Q9)
-- รุ่นการ์ด network ของเครื่อง OPNsense ว่าเป็น Intel (หัวข้อ 8.1, Q8)
+- รุ่นการ์ด network ของเครื่อง OPNsense: น่าจะเป็น Intel ยืนยันจากชื่อ interface (หัวข้อ 8.1, Q8)
 - service ที่ Office และ VPN ต้องใช้บน Server จริง เพื่อเขียน rule แบบเฉพาะเจาะจง (หัวข้อ 5)
 - VPN ใช้ split tunnel หรือ full tunnel (หัวข้อ 5)
 - มี web server หรือบริการที่ต้องเปิดให้ internet เข้ามาหรือไม่ (หัวข้อ 5)

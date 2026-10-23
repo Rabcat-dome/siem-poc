@@ -10,3 +10,4 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 0 2 1 * *    root flock -n /run/lock/siem-manifest-verify /opt/siem/deploy/siem-job.sh manifest-verify >> /var/log/siem-jobs.log 2>&1
 0 7 1 * *    root flock -n /run/lock/siem-monthly-report  /opt/siem/deploy/siem-job.sh monthly-report  >> /var/log/siem-jobs.log 2>&1
 0 3 * * *    root flock -n /run/lock/siem-backup          /opt/siem/deploy/siem-job.sh backup          >> /var/log/siem-jobs.log 2>&1
+5 * * * *    root flock -n /run/lock/siem-disk-check      /opt/siem/deploy/siem-job.sh disk-check      >> /var/log/siem-jobs.log 2>&1

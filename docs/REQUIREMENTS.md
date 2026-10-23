@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| สถานะ | **Draft v0.4**: ตัดสินใจ Q1–Q16 ครบแล้ว · เหลือข้อมูลที่ต้องหาเพิ่ม 9 รายการ ([หัวข้อ 9](#9-คำถามที่ต้องตัดสินใจร่วมกัน), [หัวข้อ 12](#12-ตรวจเทียบกับเอกสารสรุปข้อกำหนด-iso-web-filtering--syslog)) |
+| สถานะ | **Draft v0.5**: ตัดสินใจ Q1–Q16 ครบแล้ว · ได้ข้อมูลเพิ่ม 2026-10-23 (NAS, NIC, ISP) และตัดสินใจจำลอง switch/AP กับ log ของ Unbound blocklist ไว้ก่อน ส่วนที่ยังต้องยืนยันอยู่ใน[หัวข้อ 9](#9-คำถามที่ต้องตัดสินใจร่วมกัน) |
 | วันที่ | 2026-10-23 |
 | POC | `docker compose up -d` ใน repo นี้ (ดู [README](../README.md)) |
 | Diagram | [docs/architecture.html](architecture.html) |
@@ -67,10 +67,10 @@ ISMS scope ครอบคลุม**ทั้งบริษัท สำนั
 
 | | POC (repo นี้) | Phase 1: Pilot | Phase 2+ |
 |---|---|---|---|
-| แหล่ง log | OPNsense (จำลอง + เครื่องจริงได้) | OPNsense จริง | **Switch / Wi-Fi AP** (Q9) |
+| แหล่ง log | OPNsense, switch และ Wi-Fi AP (จำลอง + เครื่องจริงได้) | OPNsense จริง | **Switch / Wi-Fi AP** จริง (Q9) |
 | ขนส่ง | Syslog UDP/TCP | **Syslog over TLS** | Graylog Sidecar / agent |
 | Identity | Static CSV | **DHCP static mapping (Q5)** + VPN user, sync mapping → CSV | (ถ้าต้องการ) Captive portal สำหรับ Guest |
-| Alert | 14 use cases | ปรับ threshold จากข้อมูลจริง | Correlation หลายแหล่ง |
+| Alert | 20 use cases | ปรับ threshold จากข้อมูลจริง | Correlation หลายแหล่ง |
 | แจ้งเตือน | Mailpit + webhook จำลอง | SMTP บริษัท + LINE OA/Teams | Ticketing / SOAR |
 | Process | - | Playbook, รอบ review | Monthly report, tabletop exercise |
 
@@ -86,17 +86,17 @@ ISMS scope ครอบคลุม**ทั้งบริษัท สำนั
 | FR-02 | แยก field ของ firewall log (filterlog): action, direction, interface, rule, protocol, src/dst IP, port | M | ✅ IPv4 + IPv6 (IPv6 ทดสอบผ่าน simulator API) |
 | FR-03 | แยก field ของ IDS alert (Suricata): signature, classification, priority, src/dst | M | ✅ |
 | FR-04 | แยก field ของ admin login (สำเร็จ/ล้มเหลว) และ configuration change พร้อมบอก user และ IP ต้นทาง | M | ✅ |
-| FR-05 | แยก field ของ VPN login/session (user → tunnel IP), DHCP lease (IP → MAC → hostname) และ DNS query | S | ✅ (DHCP รองรับทั้ง ISC dhcpd และ dnsmasq) |
+| FR-05 | แยก field ของ VPN login/session (user → tunnel IP), DHCP lease (IP → MAC → hostname), DNS query และ query ที่ถูก blocklist ตอบ | S | ✅ (DHCP รองรับทั้ง ISC dhcpd และ dnsmasq · log ของ blocklist ใช้รูปแบบจำลอง ดูหัวข้อ 9) |
 | FR-06 | **Who**: ระบุ IP เป็นชื่อเครื่อง เจ้าของ แผนก และระดับความสำคัญของ asset โดยอาศัย DHCP static mapping ของเครื่องบริษัท (Q5) | M | ✅ CSV + `tools/sync_assets.py` จาก static mapping (ทดสอบกับ mock) |
 | FR-07 | **Where**: ระบุ network zone ต้นทาง/ปลายทาง และชื่อ firewall rule ที่ match | M | ✅ |
 | FR-08 | ตรวจ IP/domain กับ threat intelligence | S | ◐ list ภายใน; feed ภายนอก ⬜ |
-| FR-09 | Alert rules ตาม use case ในหัวข้อ 6 | M | ✅ 14 rules |
+| FR-09 | Alert rules ตาม use case ในหัวข้อ 6 | M | ✅ 20 rules |
 | FR-10 | แจ้งเตือนผ่าน Email (SMTP บริษัท) ทุก severity (Q4) ส่วน Webhook เป็น optional สำหรับ ticketing | M | ✅ แบบจำลอง (Mailpit) |
-| FR-11 | Dashboard: ภาพรวมผู้บริหาร, firewall, auth, threat | S | ✅ 4 dashboards สร้างโดย provisioner |
+| FR-11 | Dashboard: ภาพรวมผู้บริหาร, firewall, auth, threat, switch/Wi-Fi | S | ✅ 5 dashboards สร้างโดย provisioner |
 | FR-12 | ติดตาม incident ตั้งแต่ alert จนปิดงาน (assign, status, หลักฐาน) | S | ⬜ ใช้ ticketing |
 | FR-13 | รายงานรายเดือนสำหรับ management review | S | ✅ RPT-01 `tools/monthly_report.py` ส่ง email วันที่ 1 ด้วย `siem-monthly-report.timer` |
 | FR-14 | แจ้งเตือนเมื่อแหล่ง log หยุดส่ง | M | ✅ OPS-01 |
-| FR-15 | รับ log จาก Switch และ Wi-Fi AP (Q9) ส่วน NAS/Windows/M365 ยังไม่อยู่ในแผน | S | ⬜ Phase 2 |
+| FR-15 | รับ log จาก Switch และ Wi-Fi AP (Q9) ส่วน NAS/Windows/M365 ยังไม่อยู่ในแผน | S | ◐ จำลองแล้ว (Cisco IOS-style switch, hostapd/dropbear AP) + NET-03/04, IAM-05/06, CHG-02 · รอรุ่นจริงเพื่อแก้ parse rule |
 | FR-16 | **Web filtering** แบบ DNS: บล็อกหมวด Security risks และ Illegal บังคับให้ทุกเครื่องใช้ DNS ของ firewall และบล็อก DoH/DoT (หัวข้อ 12.2) | M | ⬜ ตั้งค่าบน OPNsense |
 | FR-17 | SIEM ตรวจการเข้าหมวดต้องห้ามและการเลี่ยง DNS filtering (WEB-01, WEB-02) พร้อมรายงานรายเดือนสำหรับ A.8.23 | S | ✅ POC: WEB-01/02 + `tools/monthly_report.py` |
 
@@ -109,7 +109,7 @@ ISMS scope ครอบคลุม**ทั้งบริษัท สำนั
 | NFR-03 | **Integrity** | Admin ของ firewall ลบหรือแก้ log ใน SIEM ไม่ได้ (แยกหน้าที่) และ archive บน Synology เป็น WriteOnce/immutable ล็อก 1 ปี (Q10) | A.8.15, A.5.3 |
 | NFR-04 | **Access control** | RBAC ตาม Q16 (IT ดูและแก้ rule ได้แต่ลบ log ไม่ได้, admin เป็น break-glass ของผู้บริหาร), บัญชีรายบุคคล, MFA สำหรับ SIEM UI และ review สิทธิ์ทุกไตรมาส · POC ✅ user `it-analyst` / `log-admin` (ทดสอบแล้วว่าลบ log ไม่ได้) | A.5.15, A.8.2, A.8.5, A.5.3 |
 | NFR-05 | **Confidentiality in transit** | Syslog over TLS และ HTTPS สำหรับ UI · POC ✅ input TLS 6514 + `tools/gen_tls_certs.sh` (ทดสอบ TLS 1.3 แล้ว), UI ยังเป็น HTTP · production ✅ UI เป็น HTTPS (`docker-compose.prod.yml`) | A.8.20, A.8.24 |
-| NFR-06 | **Capacity** | ✅ (Q6) < 50 คน ≈ ≤ 50 EPS: 4 vCPU / RAM 8 GB / disk 500 GB รองรับ EPS × 2 (ยืนยันด้วยค่าจริงใน Phase 0) | A.8.6 |
+| NFR-06 | **Capacity** | ✅ (Q6) < 50 คน ≈ ≤ 50 EPS: 4 vCPU / RAM 8 GB / disk 500 GB รองรับ EPS × 2 · ไม่วัด EPS จริง ใช้ `tools/disk_check.py` ทุกชั่วโมงแทน ถ้า disk ใช้ถึง 75% จะเกิด OPS-03 ให้ขยาย disk ก่อน OpenSearch หยุดเขียนที่ 95% | A.8.6 |
 | NFR-07 | **Backup** | Backup config ของ SIEM (MongoDB) และ pipeline/alert ในรูปแบบ code (repo นี้) · ✅ `deploy/backup.sh` ทุกคืน (MongoDB, config เข้ารหัส, config.xml ของ OPNsense) ทดสอบ restore แล้ว | A.8.13 |
 | NFR-08 | **PDPA** | log มีข้อมูลส่วนบุคคล (IP, username) จึงต้องระบุวัตถุประสงค์ จำกัดสิทธิ์เข้าถึง และกำหนดระยะเวลาเก็บ | A.5.34 |
 | NFR-09 | **Alert latency** | Alert ถึงผู้รับภายใน 2 นาทีหลังเกิดเหตุ | A.8.16 |
@@ -147,12 +147,20 @@ RAM: ≤ 50 EPS ใช้ 8 GB รวม (OpenSearch heap 2 GB, Graylog heap 1�
 | THR-01 | Threat / Malware | IDS alert priority 1 | Suricata priority 1 เช่น C2 หรือ exploit | High | A.8.7, A.8.16 | Email + Webhook |
 | THR-02 | Threat intel | Traffic ไป/มาจาก IOC และ firewall ปล่อยผ่าน | IP ตรงกับ TI list และ `fw_action:pass` | High | A.5.7 | Email + Webhook |
 | THR-03 | Threat intel / DNS | DNS query ไป domain อันตราย | domain ตรงกับ TI list (phishing/C2) | High | A.5.7, A.8.23 | Email + Webhook |
-| WEB-01 | Web filtering | เข้าหมวดที่ถูกบล็อกซ้ำ | DNS query หมวด `block` (พนัน, ลามก, ยาเสพติด, P2P, malware) ≥ 10 ครั้ง/ชม. ต่อ `src_ip` | Medium | A.8.23 | Email |
+| WEB-01 | Web filtering | เข้าหมวดที่ถูกบล็อกซ้ำ | Unbound ตอบจาก blocklist (`event_type:dns_blocked`: พนัน, ลามก, ยาเสพติด, P2P, malware) ≥ 10 ครั้ง/ชม. ต่อ `src_ip` | Medium | A.8.23 | Email |
 | WEB-02 | Web filtering | พยายามเลี่ยง DNS filtering | ถูกบล็อกตอนออก DoT 853, DNS 53 ไปเซิร์ฟเวอร์ภายนอก หรือ DoH resolver ≥ 3 ครั้ง/5 นาที | Medium | A.8.23, A.8.20 | Email |
 | OPS-02 | Log integrity | ตรวจ SHA-256 ของ archive ไม่ผ่าน | `log_manifest.py verify` พบไฟล์ถูกแก้หรือหาย | High | A.8.15, A.5.28 | Email + Webhook |
 | OPS-01 | Log health | OPNsense หยุดส่ง log | ไม่มี log จาก OPNsense ใน 5 นาที | High | A.8.15, A.8.16 | Email + Webhook |
+| OPS-03 | Capacity | disk ของ SIEM ใกล้เต็ม | `disk_check.py` พบ disk ใช้ ≥ 75% (`DISK_WARN_PCT`) แจ้งซ้ำวันละครั้งจนกว่าจะขยาย | Medium | A.8.6, A.8.15 | Email |
+| NET-03 | Asset / Network | เครื่องแปลกปลอมในโซน Office | MAC ที่ไม่อยู่ใน `assets_mac.csv` ได้ DHCP lease หรือต่อ Wi-Fi Staff ในโซน LAN-Office หรือ switch บล็อกด้วย port security | Medium | A.5.9, A.8.20 | Email |
+| NET-04 | Network | Port ของ switch ขึ้นลงถี่ (flapping) | link down ≥ 5 ครั้ง/10 นาที ต่อ port | Low | A.8.20 | Email |
+| IAM-05 | Privileged access | Brute force หน้า admin ของ switch/AP | login fail ≥ 5 ครั้ง/5 นาที ต่อ IP | High | A.8.5 | Email + Webhook |
+| IAM-06 | Privileged access | Admin login switch/AP จากนอก Management zone | login สำเร็จ และ `src_zone ≠ Management` | Medium | A.8.2, A.8.5 | Email |
+| CHG-02 | Change | Config ของ switch/AP ถูกแก้ไข | ทุก config change บอก user, IP และอุปกรณ์ | Low | A.8.9, A.8.32 | Email |
 
 > คอลัมน์ "แจ้งเตือน" แสดงพฤติกรรมของ POC ส่วนใน production ทุก alert ส่ง **Email อย่างเดียว** ตาม Q4
+>
+> NET-03/04, IAM-05/06 และ CHG-02 ทำงานกับ log จำลองของ switch/AP (Q9) เมื่อได้รุ่นจริงต้องแก้เฉพาะ parse rule (`graylog/pipeline/6*.rule`) ส่วน alert ไม่ต้องแก้ ตราบที่ rule ใหม่ตั้ง field ชื่อเดิม
 
 **Use case ที่แนะนำให้ทำต่อ (Phase 1–2)**
 
@@ -169,16 +177,17 @@ RAM: ≤ 50 EPS ใช้ 8 GB รวม (OpenSearch heap 2 GB, Graylog heap 1�
 | Control | Auditor มักขอดู | หลักฐานจากระบบนี้ |
 |---|---|---|
 | A.5.7 Threat intelligence | ใช้ข้อมูลภัยคุกคามอย่างไร | Lookup TI + stream "Threat intel hits" |
-| A.5.9 Inventory of assets | รายการ asset และเจ้าของ | `assets.csv` ที่ใช้ enrich log (ต้องตรงกับทะเบียน asset จริง) |
+| A.5.9 Inventory of assets | รายการ asset และเจ้าของ | `assets.csv` / `assets_mac.csv` ที่ใช้ enrich log (ต้องตรงกับทะเบียน asset จริง) + NET-03 จับเครื่องที่ไม่อยู่ในทะเบียน |
 | A.5.24–A.5.26 Incident management | ตรวจพบ แจ้ง และตอบสนองอย่างไร | Alert → Email/Webhook → ticket + playbook |
 | A.5.28 Collection of evidence | เก็บหลักฐานให้ใช้ได้ทางกฎหมาย | log ที่ไม่ถูกแก้ไข, export จาก Graylog, archive บน Synology |
-| A.8.2 Privileged access rights | ติดตามการใช้สิทธิ์ admin | IAM-02, IAM-03, stream `auth` |
-| A.8.5 Secure authentication | ป้องกัน brute force | IAM-01, IAM-04 |
-| A.8.9 / A.8.32 Configuration & change management | ใครแก้อะไรเมื่อไร มี change request ไหม | CHG-01 พร้อม user, IP และ backup file |
+| A.8.2 Privileged access rights | ติดตามการใช้สิทธิ์ admin | IAM-02, IAM-03, IAM-06, stream `auth`, `Network - switch`, `Network - wifi` |
+| A.8.5 Secure authentication | ป้องกัน brute force | IAM-01, IAM-04, IAM-05 |
+| A.8.6 Capacity management | วางแผนและเฝ้าดูความจุ | NFR-06 + OPS-03 (`tools/disk_check.py`) |
+| A.8.9 / A.8.32 Configuration & change management | ใครแก้อะไรเมื่อไร มี change request ไหม | CHG-01 (firewall), CHG-02 (switch/AP) พร้อม user, IP และ backup file |
 | A.8.15 Logging | log ครบ ปลอดภัย และเก็บตาม policy | Centralized, retention, RBAC, OPS-01, WriteOnce archive + SHA-256 manifest (NFR-11) |
 | A.8.16 Monitoring activities | มีการ monitor และ review จริง | Alert history, dashboard, บันทึกการ review |
 | A.8.17 Clock synchronization | เวลาตรงกันทุกระบบ | NTP config + timestamp ใน log |
-| A.8.20 / A.8.22 Network security / segregation | แยก network และตรวจการละเมิด | Zone enrichment + NET-02 |
+| A.8.20 / A.8.22 Network security / segregation | แยก network และตรวจการละเมิด | Zone enrichment + NET-02, NET-03, NET-04 |
 | A.8.23 Web filtering | ควบคุมการเข้าเว็บอันตราย | Unbound DNS blocklist + บล็อก DoH/DoT (FR-16), THR-03, WEB-01/02, รายงานรายเดือน (หัวข้อ 12.2) |
 
 > ISO ไม่ได้บังคับว่าต้องใช้เครื่องมือยี่ห้อใด สิ่งที่ auditor ดูคือ **policy + การปฏิบัติจริง + หลักฐาน** เช่น นโยบาย logging, รอบการ review และตัวอย่าง incident ที่ตรวจพบและจัดการแล้ว
@@ -210,10 +219,10 @@ RAM: ≤ 50 EPS ใช้ 8 GB รวม (OpenSearch heap 2 GB, Graylog heap 1�
 | Q3 | ผู้รับ alert / SLA | IT in-house ในเวลาทำการ, นอกเวลา best effort · High เริ่มตรวจภายใน 1 ชม. |
 | Q4 | ช่องทางแจ้งเตือน | Email อย่างเดียว |
 | Q5 | Identity | DHCP static mapping |
-| Q6 | ปริมาณ log | < 50 คน ≈ ≤ 50 EPS (ยืนยันด้วยค่าจริง) |
+| Q6 | ปริมาณ log | < 50 คน ≈ ≤ 50 EPS · ไม่วัดค่าจริง เฝ้า disk ด้วย OPS-03 แล้วค่อยขยาย |
 | Q7 | ที่ติดตั้ง SIEM | เครื่องแยก on-prem ใน Management VLAN |
 | Q8 | IDS/IPS | IDS ก่อน แล้วเปิด IPS บาง ruleset |
-| Q9 | แหล่ง log Phase 2 | Switch / Wi-Fi AP |
+| Q9 | แหล่ง log Phase 2 | Switch / Wi-Fi AP (ยังไม่ทราบรุ่น จึงจำลองไว้ใน POC) |
 | Q10 | Archive | Synology แบบ WriteOnce / immutable |
 | Q11 | งบประมาณ | Open source ล้วน + hardware |
 | Q12 | Firewall HA | ยอมรับความเสี่ยง + backup config |
@@ -222,17 +231,17 @@ RAM: ≤ 50 EPS ใช้ 8 GB รวม (OpenSearch heap 2 GB, Graylog heap 1�
 | Q15 | สำเนา archive นอก site | ยอมรับความเสี่ยง |
 | Q16 | Log Administrator | IT ใช้ role จำกัด, ผู้บริหารถือ admin (break-glass) |
 
-**ข้อมูลที่ยังต้องหาเพิ่ม**
+**ข้อมูลที่ยังต้องหาเพิ่ม** (อัปเดต 2026-10-23)
 
-- [ ] รุ่น Synology, เวอร์ชัน DSM และชนิด volume (Btrfs?) เพื่อยืนยัน WriteOnce/immutable (Q10)
-- [ ] ยี่ห้อ/รุ่นของ switch และ Wi-Fi AP เพื่อเขียน pipeline rule (Q9)
-- [ ] รุ่นการ์ด network ของเครื่อง OPNsense (Intel หรือไม่) ก่อนเปิด IPS (Q8)
-- [ ] EPS จริงจากการชี้ OPNsense เข้า POC 1 สัปดาห์ (Q6)
+- [ ] **Synology (Q10):** แจ้งว่าเป็น **DS724+** แต่ไม่พบรุ่นนี้ทั้งในหน้าสินค้าและใน[รายการรุ่นที่รองรับ WriteOnce และ immutable snapshot](https://kb.synology.com/en-global/DSM/tutorial/which_synology_nas_models_support_WriteOnce_and_secure_snapshots) ของ Synology (ตรวจเมื่อ 2026-10-23) รุ่น 2-bay ที่ชื่อใกล้เคียงคือ DS723+, DS224+ และ DS725+ ซึ่งอยู่ในรายการทั้งหมด ให้ดูชื่อรุ่นจริงที่ Control Panel › Info Center และเช็กว่า volume เป็น Btrfs (WriteOnce ต้องใช้ Btrfs)
+- [x] **Switch และ Wi-Fi AP (Q9):** ยังไม่ทราบรุ่น **ตัดสินใจ:** จำลองไว้ก่อน simulator ส่ง log ของ switch แบบ Cisco IOS (`%LINK-3-UPDOWN`, `%PORT_SECURITY`, `%SEC_LOGIN`, `%SYS-5-CONFIG_I`) และของ AP แบบ hostapd/dropbear ซึ่ง AP ที่เป็น Linux ส่วนใหญ่ใช้ พร้อม alert NET-03/04, IAM-05/06, CHG-02 เมื่อได้รุ่นจริงให้แก้เฉพาะ parse rule และ `wifi_ssids.csv`
+- [ ] **การ์ด network ของ OPNsense (Q8):** น่าจะเป็น Intel ยืนยันก่อนเปิด IPS ที่ Interfaces › Overview ถ้าชื่อ interface เป็น `igb`, `igc`, `em` หรือ `ix` คือ Intel ถ้าเป็น `re` คือ Realtek
+- [x] **EPS จริง (Q6):** **ตัดสินใจ:** ไม่วัด ใช้ sizing ตาม Q6 แล้วเฝ้า disk ด้วย OPS-03 (`tools/disk_check.py` ทุกชั่วโมง เตือนที่ 75%) ถ้าเต็มค่อยขยาย
 - [ ] ฝ่ายกฎหมายยืนยันการตีความ พ.ร.บ.คอมพิวเตอร์ มาตรา 26 รวมถึงการระบุตัวผู้ใช้ Guest Wi-Fi (Q5)
 - [ ] ผู้บริหารเซ็น risk acceptance: firewall ไม่มีเครื่องสำรอง (Q12), Guest ระบุตัวได้แค่ MAC (Q5), NAS/Windows ไม่ได้ส่ง log เข้า SIEM (Q9) และไม่มีสำเนา log นอก site (Q15)
-- [ ] ตอนนี้ OPNsense เปิด Unbound blocklist หรือ web filtering อะไรไว้แล้วบ้าง (หัวข้อ 12.2)
+- [x] **Unbound blocklist และ log ของ query ที่ถูก block (หัวข้อ 12.2):** **ตัดสินใจ:** จำลองไว้ก่อน simulator ส่งบรรทัดแบบ `log-local-actions` ของ Unbound เช่น `info: slot-888.example. always_null 192.168.10.23@51234 www.slot-888.example. A IN` แล้ว rule `19b_parse_dns_blocked` ตั้ง `event_type:dns_blocked` ให้ WEB-01, dashboard และ RPT-01 นับ ตอนต่อเครื่องจริงให้เทียบรูปแบบกับ log จริง ถ้าต่างให้แก้ rule 19b ถ้าเครื่องจริงไม่ log query ที่ถูก block ให้เปลี่ยน `DNS_BLOCKED` ใน `provision.py` และ `monthly_report.py` เป็น `web_policy:block` (lookup หมวดจาก `web_categories.csv` แทน)
 - [ ] ยืนยันว่าทุกเครื่องมี antivirus (เช่น Microsoft Defender) เปิดอยู่และอัปเดต เพราะเป็น compensating control หลักของ Q14
-- [ ] syslog ของ Unbound บนเครื่องจริงระบุ query ที่ถูก block หรือไม่ (ถ้าไม่ระบุ SIEM ต้อง lookup หมวดจาก blocklist ชุดเดียวกันเอง)
+- [x] **การต่อ ISP:** ADSL, public IP ไม่ fixed แต่ทำ DDNS ได้ ดูผลกระทบใน [NETWORK-ARCHITECTURE หัวข้อ 7](NETWORK-ARCHITECTURE.md#7-การต่อกับ-isp-decision-record)
 
 **รายละเอียดแต่ละข้อ**
 
@@ -257,7 +266,8 @@ RAM: ≤ 50 EPS ใช้ 8 GB รวม (OpenSearch heap 2 GB, Graylog heap 1�
     - **ความเสี่ยงที่ยอมรับ:** (1) ระบุได้ระดับเจ้าของเครื่อง ไม่ใช่คนที่นั่งหน้าเครื่องจริง ถ้ามีเครื่องใช้ร่วมกันต้องจดไว้ในทะเบียน (2) ผู้ใช้ Guest Wi-Fi ระบุตัวได้แค่ MAC/hostname ควรบันทึกเป็น risk acceptance และทบทวนกับฝ่ายกฎหมายเรื่องหน้าที่ระบุตัวผู้ใช้บริการ
 - [x] **Q6 ปริมาณ log:** EPS จริงจาก OPNsense (ดูจาก Synology) เพื่อทำ sizing
   - **ตัดสินใจ:** บริษัทมีพนักงานน้อยกว่า 50 คน จึงประเมินไว้ที่ ≤ 50 EPS
-  - **ผลกระทบ:** sizing เป้าหมายคือ 4 vCPU / RAM 8 GB / disk 500 GB สำหรับ hot 90 วัน (~300 GB บวก headroom) ควรยืนยันตัวเลขด้วยการชี้ OPNsense จริงเข้า POC 1 สัปดาห์ระหว่างทำ Phase 0
+  - **ผลกระทบ:** sizing เป้าหมายคือ 4 vCPU / RAM 8 GB / disk 500 GB สำหรับ hot 90 วัน (~300 GB บวก headroom)
+  - **อัปเดต (2026-10-23):** ไม่วัด EPS จริง ถ้าพื้นที่เต็มค่อยขยาย จึงเพิ่ม OPS-03 เตือนเมื่อ disk ใช้ถึง 75% เพราะถ้าปล่อยถึง 95% OpenSearch จะหยุดเขียนและ log ใหม่จะหาย (ขัดกับ A.8.15) ควรเลือกเครื่องที่เพิ่ม disk ได้ หรือใช้ LVM เพื่อขยาย volume ได้โดยไม่ต้องย้ายข้อมูล
 - [x] **Q7 ที่ติดตั้ง SIEM:** VM บน Synology (VMM), server แยก หรือ cloud
   - **ตัดสินใจ:** เครื่องแยก on-prem (mini PC หรือ server เล็ก RAM 16 GB, SSD 1 TB) รัน docker compose ชุดเดียวกับ POC
   - **ผลกระทบ:**
@@ -268,19 +278,19 @@ RAM: ≤ 50 EPS ใช้ 8 GB รวม (OpenSearch heap 2 GB, Graylog heap 1�
 - [x] **Q8 IDS หรือ IPS:** ต้องการแค่ตรวจจับหรือให้ block อัตโนมัติด้วย
   - **ตัดสินใจ:** เริ่มด้วย IDS 2–4 สัปดาห์เพื่อ tune false positive จากข้อมูลใน SIEM แล้วจึงเปิด IPS (drop) เฉพาะ ruleset ที่แม่นสูง (malware/C2, abuse.ch)
   - **ผลกระทบ:**
-    - ก่อนเปิด IPS ต้องเช็กว่าเครื่อง OPNsense ใช้การ์ด Intel (รองรับ netmap) และ CPU รับไหว
+    - ก่อนเปิด IPS ต้องเช็กว่าเครื่อง OPNsense ใช้การ์ด Intel (รองรับ netmap) และ CPU รับไหว · **อัปเดต:** น่าจะเป็น Intel ยืนยันจากชื่อ interface (หัวข้อ "ข้อมูลที่ยังต้องหาเพิ่ม")
     - การเปิด IPS เป็น change ที่ต้องผ่าน change management (CHG-01 จะจับได้)
     - เพิ่ม use case ใน Phase 1: "IPS dropped" สำหรับรายงาน และ "IDS alert เดิมซ้ำจากเครื่องเดิม" เพื่อหาเครื่องที่ติดเชื้อ
 - [x] **Q9 แหล่ง log Phase 2:** AD, file server, ERP, M365, switch/AP
   - **ตัดสินใจ:** Phase 2 เพิ่ม log จาก Switch และ Wi-Fi AP
   - **ผลกระทบ:**
-    - ส่ง syslog เข้า input `:1514` เดิมได้ แต่ต้องเขียน pipeline rule ตามยี่ห้อ **(ต้องระบุยี่ห้อ/รุ่นของ switch และ AP)**
+    - ส่ง syslog เข้า input `:1514` เดิมได้ แต่ต้องเขียน pipeline rule ตามยี่ห้อ · **อัปเดต:** ยังไม่ทราบรุ่น POC จึงจำลอง log แบบ Cisco IOS (switch) และ hostapd/dropbear (AP) ไว้ก่อน ได้ stream `Network - switch`, `Network - wifi`, dashboard "SIEM - Switch & Wi-Fi" และ alert NET-03/04, IAM-05/06, CHG-02
     - use case ที่ได้: เครื่องแปลกปลอมเสียบ port / MAC ใหม่ที่ไม่อยู่ใน DHCP static mapping (ต่อยอดจาก Q5), port flapping, login หน้า admin ของ switch/AP
     - **ช่องว่างที่ต้องรับทราบ:** NAS, Windows และ cloud email ไม่ได้ส่งเข้า SIEM จึงต้องใช้ log ในตัวของแต่ละระบบเป็นหลักฐาน A.8.15 พร้อมเขียนรอบการ review ให้ชัด (เช่น เปิด Log Center ของ Synology ดูทุกเดือน) ควรทบทวนเรื่อง NAS ในรอบถัดไป เพราะต่อเข้า SIEM ได้ง่ายและเป็นที่เก็บข้อมูลสำคัญ
 - [x] **Q10 Synology:** เก็บเป็น archive ต่อ และเปิด immutable snapshot ได้หรือไม่
   - **ตัดสินใจ:** เก็บ archive บน Synology แบบแก้ไขไม่ได้ ด้วย shared folder แบบ WriteOnce (WORM) หรือ immutable snapshot ตามที่รุ่นและ DSM รองรับ
   - **ผลกระทบ:**
-    - ต้องเช็กรุ่น NAS, DSM version และ volume ว่าเป็น Btrfs หรือไม่ **(รอข้อมูลรุ่น NAS)**
+    - ต้องเช็กรุ่น NAS, DSM version และ volume ว่าเป็น Btrfs หรือไม่ · **อัปเดต:** แจ้งว่าเป็น DS724+ แต่ไม่มีรุ่นนี้ในรายการของ Synology ต้องยืนยันชื่อรุ่น (รุ่นใกล้เคียง DS723+, DS224+, DS725+ รองรับ WriteOnce ทั้งหมด)
     - ตั้ง archive ของ Log Center ให้ลง folder ที่ล็อกไว้ 1 ปี (ตาม Q2) และจำกัดสิทธิ์ folder ไม่ให้ admin firewall เข้าถึง
     - ใช้เป็นหลักฐาน A.8.15 และ A.5.28 (log ไม่ถูกแก้ไข)
 - [x] **Q11 งบประมาณ:** ยอมจ่าย license (Zenarmor, Graylog Security) หรือใช้ open source ล้วน
@@ -333,16 +343,16 @@ RAM: ≤ 50 EPS ใช้ 8 GB รวม (OpenSearch heap 2 GB, Graylog heap 1�
 1. OPNsense จริงส่ง log เข้า Graylog ได้ และแสดงผลภายใน 10 วินาที
 2. filterlog ≥ 95% parse สำเร็จ (ไม่มี `gl2_processing_error`)
 3. สำหรับ incident ตัวอย่าง ทีมตอบได้ภายใน 1 นาทีว่า ใคร / เครื่องไหน / จาก zone ไหน / ไปที่ไหน / rule ไหน
-4. Alert ทั้ง 14 ข้อทำงาน และแจ้งเตือนถึง Email/Webhook ภายใน 2 นาที
+4. Alert ทั้ง 20 ข้อทำงาน และแจ้งเตือนถึง Email/Webhook ภายใน 2 นาที
 5. ทีมสาธิต walkthrough แบบที่จะทำให้ auditor ดูได้ (alert → สืบสวน → หลักฐาน)
 
 ## 11. Roadmap
 
 | Phase | ระยะเวลา (ประมาณ) | งาน |
 |---|---|---|
-| 0 POC | 1–2 สัปดาห์ | repo นี้ + OPNsense ทดสอบบนเครื่อง x86 ยิง traffic จริงด้วย `traffic-generator` + ต่อ OPNsense จริง 1 สัปดาห์เพื่อวัด EPS (Q6) + ปรับ regex ให้ตรง log จริง |
+| 0 POC | 1–2 สัปดาห์ | repo นี้ + OPNsense ทดสอบบนเครื่อง x86 ยิง traffic จริงด้วย `traffic-generator` + ต่อ OPNsense จริงเพื่อปรับ regex ให้ตรง log จริง (รวมรูปแบบ log ของ Unbound blocklist) |
 | 1 Pilot | 2–4 สัปดาห์ | ซื้อและติดตั้งเครื่อง SIEM ใน Management VLAN (Q7), index set 90 วัน (Q2), Synology WriteOnce (Q10), SMTP บริษัท (Q4), DHCP static mapping + sync asset CSV ด้วย `tools/sync_assets.py` กับ OPNsense จริง (Q5), IDS mode (Q8), backup config OPNsense (Q12), DNS web filtering + บล็อก DoH/DoT (FR-16), SHA-256 manifest (NFR-11), NTP ตาม NFR-02, TLS, RBAC/MFA ตาม Q16 และ dashboard |
-| 2 Expand | 1–2 เดือน | Switch / Wi-Fi AP (Q9), TI feed ภายนอก |
+| 2 Expand | 1–2 เดือน | Switch / Wi-Fi AP จริง (Q9): แก้ parse rule จำลองให้ตรงรุ่นจริง, TI feed ภายนอก |
 | 3 Operate | ต่อเนื่อง | review alert รายสัปดาห์, report รายเดือน, tabletop exercise, tune rule |
 
 ---
@@ -357,7 +367,7 @@ RAM: ≤ 50 EPS ใช้ 8 GB รวม (OpenSearch heap 2 GB, Graylog heap 1�
 
 | องค์ประกอบ | เอกสารกำหนด | สถานะ | ของเราทำอย่างไร / ต้องเพิ่มอะไร |
 |---|---|---|---|
-| Log sources | NGFW, switch, router, server, web proxy, security appliance ส่ง syslog UDP/TCP 514 และตั้ง log level ให้เหมาะสม | ◐ | OPNsense ✅, switch/AP อยู่ใน Phase 2 (Q9), server/NAS ไม่ส่ง (เป็นช่องว่างใน Q9), ไม่มี web proxy · **port:** POC ใช้ 1514 เพราะ Graylog ไม่ได้รันเป็น root ใน production ให้ map host `514` → container `1514` ได้ · **log level:** log เฉพาะ rule ที่สำคัญ (หัวข้อ 5) |
+| Log sources | NGFW, switch, router, server, web proxy, security appliance ส่ง syslog UDP/TCP 514 และตั้ง log level ให้เหมาะสม | ◐ | OPNsense ✅, switch/AP จำลองใน POC แล้ว ของจริงอยู่ใน Phase 2 (Q9), server/NAS ไม่ส่ง (เป็นช่องว่างใน Q9), ไม่มี web proxy · **port:** POC ใช้ 1514 เพราะ Graylog ไม่ได้รันเป็น root ใน production ให้ map host `514` → container `1514` ได้ · **log level:** log เฉพาะ rule ที่สำคัญ (หัวข้อ 5) |
 | Collector | Graylog, ELK, rsyslog ฯลฯ ส่งผ่าน syslog over TLS (6514) **หรือ** แยก Management VLAN | ✅ | Graylog (Q11) บนเครื่องแยกใน Management VLAN (Q7) ผ่านเงื่อนไขนี้แล้ว ส่วน TLS 6514 อยู่ใน NFR-05 เป็นงานเสริม |
 | Retention | Hot ≥ 90 วัน + archive 1–2 ปี · sizing 2–5 MB/user/วัน | ✅ | Q2: 90 วัน + 1 ปี · ตรวจกับสูตรในเอกสาร: 50 คน × 5 MB = 250 MB/วัน ≈ 23 GB/90 วัน ต่ำกว่าค่าที่ประเมินจาก EPS (~300 GB) มาก disk 500 GB จึงเหลือเฟือ ค่าจริงจาก Q6 จะเป็นตัวตัดสิน |
 | Time sync | ทุกอุปกรณ์ sync กับ NTP เดียวกัน เช่น `time.navy.mi.th`, `time.nimt.or.th` | ✅ | ปรับ NFR-02 ให้ระบุ server แล้ว (OPNsense เป็น NTP ภายใน) |
@@ -391,10 +401,10 @@ RAM: ≤ 50 EPS ใช้ 8 GB รวม (OpenSearch heap 2 GB, Graylog heap 1�
 | Business & general | Allow + monitor & log | ✅ DNS query log → stream `OPNsense - dns` (FR-05) | ✅ |
 | Unrated / NRDs (โดเมนจดใหม่) | Block / warn / review | ◐ ใส่ NRD blocklist สาธารณะเป็น custom blocklist ของ Unbound | Review รายสัปดาห์ |
 
-**Use case ใหม่สำหรับ SIEM (FR-17)**: WEB-01 และ WEB-02 ทำงานใน POC แล้ว (category มาจาก `web_categories.csv`, การเลี่ยง DNS มาจาก tag `dns-bypass` ใน `fw_rules.csv`) ส่วน RPT-01 ทำแล้วด้วย `tools/monthly_report.py` (FR-13)
+**Use case ใหม่สำหรับ SIEM (FR-17)**: WEB-01 และ WEB-02 ทำงานใน POC แล้ว (WEB-01 นับ query ที่ Unbound ตอบจาก blocklist และได้หมวดจาก `web_categories.csv`, การเลี่ยง DNS มาจาก tag `dns-bypass` ใน `fw_rules.csv`) ส่วน RPT-01 ทำแล้วด้วย `tools/monthly_report.py` (FR-13)
 
 | ID | Alert | Logic (ร่าง) | ISO |
 |---|---|---|---|
-| WEB-01 | เครื่องเดิมพยายามเข้าหมวดต้องห้ามซ้ำ | DNS query ไป domain หมวด Security/Illegal ≥ 10 ครั้ง/ชม. ต่อ `src_ip` (SIEM ต้อง lookup หมวดจาก blocklist ชุดเดียวกับ Unbound) | A.8.23 |
+| WEB-01 | เครื่องเดิมพยายามเข้าหมวดต้องห้ามซ้ำ | Unbound ตอบจาก blocklist ≥ 10 ครั้ง/ชม. ต่อ `src_ip` (หมวดมาจาก `web_categories.csv` ชุดเดียวกับ blocklist) | A.8.23 |
 | WEB-02 | พยายามเลี่ยง DNS filtering | traffic ออก port 853, ไป DoH resolver ที่บล็อกไว้ หรือ DNS 53 ไปเซิร์ฟเวอร์ภายนอกโดยตรง | A.8.23, A.8.20 |
 | RPT-01 | รายงานรายเดือน | top หมวดที่ถูกบล็อก / top เครื่อง / แนวโน้ม ใช้เป็นหลักฐาน A.8.23 และนำเข้า management review (Clause 9.3) | A.8.23, Cl. 9 |
