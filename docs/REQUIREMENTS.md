@@ -94,7 +94,7 @@ ISMS scope ครอบคลุม**ทั้งบริษัท สำนั
 | FR-10 | แจ้งเตือนผ่าน Email (SMTP บริษัท) ทุก severity (Q4) ส่วน Webhook เป็น optional สำหรับ ticketing | M | ✅ แบบจำลอง (Mailpit) |
 | FR-11 | Dashboard: ภาพรวมผู้บริหาร, firewall, auth, threat | S | ✅ 4 dashboards สร้างโดย provisioner |
 | FR-12 | ติดตาม incident ตั้งแต่ alert จนปิดงาน (assign, status, หลักฐาน) | S | ⬜ ใช้ ticketing |
-| FR-13 | รายงานรายเดือนสำหรับ management review | S | ⬜ |
+| FR-13 | รายงานรายเดือนสำหรับ management review | S | ✅ RPT-01 `tools/monthly_report.py` ส่ง email วันที่ 1 ด้วย `siem-monthly-report.timer` |
 | FR-14 | แจ้งเตือนเมื่อแหล่ง log หยุดส่ง | M | ✅ OPS-01 |
 | FR-15 | รับ log จาก Switch และ Wi-Fi AP (Q9) ส่วน NAS/Windows/M365 ยังไม่อยู่ในแผน | S | ⬜ Phase 2 |
 | FR-16 | **Web filtering** แบบ DNS: บล็อกหมวด Security risks และ Illegal บังคับให้ทุกเครื่องใช้ DNS ของ firewall และบล็อก DoH/DoT (หัวข้อ 12.2) | M | ⬜ ตั้งค่าบน OPNsense |
@@ -341,8 +341,8 @@ RAM: ≤ 50 EPS ใช้ 8 GB รวม (OpenSearch heap 2 GB, Graylog heap 1�
 | Phase | ระยะเวลา (ประมาณ) | งาน |
 |---|---|---|
 | 0 POC | 1–2 สัปดาห์ | repo นี้ + OPNsense ทดสอบบนเครื่อง x86 ยิง traffic จริงด้วย `traffic-generator` + ต่อ OPNsense จริง 1 สัปดาห์เพื่อวัด EPS (Q6) + ปรับ regex ให้ตรง log จริง |
-| 1 Pilot | 2–4 สัปดาห์ | ซื้อและติดตั้งเครื่อง SIEM ใน Management VLAN (Q7), index set 90 วัน (Q2), Synology WriteOnce (Q10), SMTP บริษัท (Q4), DHCP static mapping + asset CSV (Q5), IDS mode (Q8), backup config OPNsense (Q12), DNS web filtering + บล็อก DoH/DoT (FR-16), SHA-256 manifest (NFR-11), NTP ตาม NFR-02, TLS, RBAC/MFA ตาม Q16 และ dashboard |
-| 2 Expand | 1–2 เดือน | Switch / Wi-Fi AP (Q9), sync DHCP static mapping → asset CSV (Q5), TI feed ภายนอก |
+| 1 Pilot | 2–4 สัปดาห์ | ซื้อและติดตั้งเครื่อง SIEM ใน Management VLAN (Q7), index set 90 วัน (Q2), Synology WriteOnce (Q10), SMTP บริษัท (Q4), DHCP static mapping + sync asset CSV ด้วย `tools/sync_assets.py` กับ OPNsense จริง (Q5), IDS mode (Q8), backup config OPNsense (Q12), DNS web filtering + บล็อก DoH/DoT (FR-16), SHA-256 manifest (NFR-11), NTP ตาม NFR-02, TLS, RBAC/MFA ตาม Q16 และ dashboard |
+| 2 Expand | 1–2 เดือน | Switch / Wi-Fi AP (Q9), TI feed ภายนอก |
 | 3 Operate | ต่อเนื่อง | review alert รายสัปดาห์, report รายเดือน, tabletop exercise, tune rule |
 
 ---
@@ -391,7 +391,7 @@ RAM: ≤ 50 EPS ใช้ 8 GB รวม (OpenSearch heap 2 GB, Graylog heap 1�
 | Business & general | Allow + monitor & log | ✅ DNS query log → stream `OPNsense - dns` (FR-05) | ✅ |
 | Unrated / NRDs (โดเมนจดใหม่) | Block / warn / review | ◐ ใส่ NRD blocklist สาธารณะเป็น custom blocklist ของ Unbound | Review รายสัปดาห์ |
 
-**Use case ใหม่สำหรับ SIEM (FR-17)**: WEB-01 และ WEB-02 ทำงานใน POC แล้ว (category มาจาก `web_categories.csv`, การเลี่ยง DNS มาจาก tag `dns-bypass` ใน `fw_rules.csv`) ส่วน RPT-01 ยังไม่ทำ
+**Use case ใหม่สำหรับ SIEM (FR-17)**: WEB-01 และ WEB-02 ทำงานใน POC แล้ว (category มาจาก `web_categories.csv`, การเลี่ยง DNS มาจาก tag `dns-bypass` ใน `fw_rules.csv`) ส่วน RPT-01 ทำแล้วด้วย `tools/monthly_report.py` (FR-13)
 
 | ID | Alert | Logic (ร่าง) | ISO |
 |---|---|---|---|
