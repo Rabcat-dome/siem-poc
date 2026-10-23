@@ -15,9 +15,9 @@ flowchart LR
   subgraph GL[Graylog SIEM - docker compose]
     IN[Syslog input :1514]
     PIPE[Pipeline<br/>parse · enrich · route]:::focal
-    LUT[(Lookup tables<br/>asset · zone · rule · TI)]
-    OS[(OpenSearch<br/>8 streams)]
-    AL[Alert engine<br/>11 event definitions]:::focal
+    LUT[(Lookup tables<br/>asset · zone · rule · TI · web)]
+    OS[(OpenSearch<br/>9 streams)]
+    AL[Alert engine<br/>13 event definitions]:::focal
   end
   FW -- syslog --> IN
   FW -- syslog copy --> NAS
@@ -63,6 +63,8 @@ event_category:firewall AND fw_action:block
 src_zone:Guest AND dst_zone:Server
 threat_indicator:true
 event_type:gui_login_failure
+web_policy:block
+web_category:social
 ```
 
 **ดู alert:** Graylog › Alerts (หรือดูที่ Mailpit/Webhook) alert ถูกประเมินทุก 1 นาที ส่วน IAM-03 (admin login นอกเวลา) จะยิงเฉพาะช่วง 19:00–07:59 เวลาไทย
@@ -73,7 +75,7 @@ event_type:gui_login_failure
 docker compose run --rm --no-deps generator python /app/opnsense_simulator.py --play all
 ```
 
-หรือเลือกเฉพาะบางตัว เช่น `--play port_scan c2_beacon` (มี `port_scan`, `gui_bruteforce`, `admin_login_unusual`, `config_change`, `c2_beacon`, `phishing_dns`, `vpn_bruteforce`, `guest_lateral`, `ids_web_attack`, `vpn_login_ok`)
+หรือเลือกเฉพาะบางตัว เช่น `--play port_scan c2_beacon` (มี `port_scan`, `gui_bruteforce`, `admin_login_unusual`, `config_change`, `c2_beacon`, `phishing_dns`, `vpn_bruteforce`, `guest_lateral`, `ids_web_attack`, `vpn_login_ok`, `blocked_category`, `dns_bypass`)
 
 **ทดสอบ alert "log หาย" (OPS-01):**
 
@@ -95,6 +97,8 @@ docker compose stop generator
 3. Intrusion Detection › Administration › เปิด **Enable syslog alerts**
 4. Unbound DNS › Advanced › เปิด **Log Queries** (ถ้าต้องการ DNS)
 5. แก้ไฟล์ใน `graylog/lookup/` ให้ตรงกับบริษัท (asset จริง, subnet จริง, rule ID จริงซึ่งดูได้จาก Firewall › Log Files › Live View)
+   - `fw_rules.csv` คอลัมน์ `tag`: ใส่ `dns-bypass` ให้ rule ที่บล็อก DoT (853), DNS ออกนอก (53) และ DoH resolver เพื่อให้ WEB-02 ทำงาน
+   - `web_categories.csv`: ใช้ domain ชุดเดียวกับ blocklist ที่เปิดใน Unbound (policy `block`) และหมวดที่แค่ monitor (policy `monitor`) ใส่ระดับ domain หลัก แล้ว subdomain จะ match ให้เอง
 6. เทียบ log จริงกับ regex ใน `graylog/pipeline/*.rule` ถ้ารูปแบบต่างจากที่ simulator ส่ง (เช่นใช้ dnsmasq แทน ISC dhcpd) ให้แก้ rule แล้วรัน provisioner ใหม่
 
 ## โครงสร้าง repo
@@ -104,7 +108,7 @@ docker-compose.yml            # mongodb, opensearch, graylog, provisioner, gener
 generator/opnsense_simulator.py  # ยิง log แบบ OPNsense ทุก 5 วินาที + attack scenarios
 graylog/pipeline/*.rule       # parse (stage 0) → enrich (stage 1) → route (stage 2)
 graylog/pipeline/opnsense.pipeline
-graylog/lookup/*.csv          # asset inventory, network zones, firewall rules, threat intel
+graylog/lookup/*.csv          # asset inventory, network zones, firewall rules (+ tag), threat intel, web categories
 provisioner/provision.py      # สร้างทุกอย่างผ่าน Graylog REST API (รันซ้ำได้)
 webhook/receiver.py           # รับ HTTP notification แทน LINE/Teams/ticketing
 docs/                         # requirement + diagram
@@ -132,6 +136,8 @@ docker compose run --rm provisioner
 | THR-01 | IDS alert priority 1 | High |
 | THR-02 | Firewall ปล่อยผ่าน traffic ไป/มาจาก IOC | High |
 | THR-03 | DNS query ไป domain อันตราย | High |
+| WEB-01 | เครื่องเดิม query หมวดที่ถูกบล็อก ≥ 10 ครั้ง/ชม. | Medium |
+| WEB-02 | พยายามเลี่ยง DNS filtering (DoT 853, DNS ภายนอก, DoH) | Medium |
 | OPS-01 | OPNsense หยุดส่ง log 5 นาที | High |
 
 High ส่งทั้ง Email และ Webhook ส่วน Medium/Low ส่ง Email อย่างเดียว รายละเอียดและ ISO mapping อยู่ใน [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md#6-alert-use-cases-ทำงานใน-poc-แล้ว)

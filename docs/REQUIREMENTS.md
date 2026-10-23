@@ -69,7 +69,7 @@ ISMS scope ครอบคลุม**ทั้งบริษัท สำนั
 | แหล่ง log | OPNsense (จำลอง + เครื่องจริงได้) | OPNsense จริง | **Switch / Wi-Fi AP** (Q9) |
 | ขนส่ง | Syslog UDP/TCP | **Syslog over TLS** | Graylog Sidecar / agent |
 | Identity | Static CSV | **DHCP static mapping (Q5)** + VPN user, sync mapping → CSV | (ถ้าต้องการ) Captive portal สำหรับ Guest |
-| Alert | 11 use cases | ปรับ threshold จากข้อมูลจริง | Correlation หลายแหล่ง |
+| Alert | 13 use cases | ปรับ threshold จากข้อมูลจริง | Correlation หลายแหล่ง |
 | แจ้งเตือน | Mailpit + webhook จำลอง | SMTP บริษัท + LINE OA/Teams | Ticketing / SOAR |
 | Process | - | Playbook, รอบ review | Monthly report, tabletop exercise |
 
@@ -89,7 +89,7 @@ ISMS scope ครอบคลุม**ทั้งบริษัท สำนั
 | FR-06 | **Who**: ระบุ IP เป็นชื่อเครื่อง เจ้าของ แผนก และระดับความสำคัญของ asset โดยอาศัย DHCP static mapping ของเครื่องบริษัท (Q5) | M | ◐ static CSV; sync จาก OPNsense ⬜ |
 | FR-07 | **Where**: ระบุ network zone ต้นทาง/ปลายทาง และชื่อ firewall rule ที่ match | M | ✅ |
 | FR-08 | ตรวจ IP/domain กับ threat intelligence | S | ◐ list ภายใน; feed ภายนอก ⬜ |
-| FR-09 | Alert rules ตาม use case ในหัวข้อ 6 | M | ✅ 11 rules |
+| FR-09 | Alert rules ตาม use case ในหัวข้อ 6 | M | ✅ 13 rules |
 | FR-10 | แจ้งเตือนผ่าน Email (SMTP บริษัท) ทุก severity (Q4) ส่วน Webhook เป็น optional สำหรับ ticketing | M | ✅ แบบจำลอง (Mailpit) |
 | FR-11 | Dashboard: ภาพรวมผู้บริหาร, firewall, auth, threat | S | ⬜ |
 | FR-12 | ติดตาม incident ตั้งแต่ alert จนปิดงาน (assign, status, หลักฐาน) | S | ⬜ ใช้ ticketing |
@@ -97,7 +97,7 @@ ISMS scope ครอบคลุม**ทั้งบริษัท สำนั
 | FR-14 | แจ้งเตือนเมื่อแหล่ง log หยุดส่ง | M | ✅ OPS-01 |
 | FR-15 | รับ log จาก Switch และ Wi-Fi AP (Q9) ส่วน NAS/Windows/M365 ยังไม่อยู่ในแผน | S | ⬜ Phase 2 |
 | FR-16 | **Web filtering** แบบ DNS: บล็อกหมวด Security risks และ Illegal บังคับให้ทุกเครื่องใช้ DNS ของ firewall และบล็อก DoH/DoT (หัวข้อ 12.2) | M | ⬜ ตั้งค่าบน OPNsense |
-| FR-17 | SIEM ตรวจการเข้าหมวดต้องห้ามและการเลี่ยง DNS filtering (WEB-01, WEB-02) พร้อมรายงานรายเดือนสำหรับ A.8.23 | S | ⬜ Phase 1 |
+| FR-17 | SIEM ตรวจการเข้าหมวดต้องห้ามและการเลี่ยง DNS filtering (WEB-01, WEB-02) พร้อมรายงานรายเดือนสำหรับ A.8.23 | S | ◐ WEB-01/02 ✅ POC, RPT-01 ⬜ |
 
 ## 5. Non-functional requirements
 
@@ -146,6 +146,8 @@ RAM: ≤ 50 EPS ใช้ 8 GB รวม (OpenSearch heap 2 GB, Graylog heap 1�
 | THR-01 | Threat / Malware | IDS alert priority 1 | Suricata priority 1 เช่น C2 หรือ exploit | High | A.8.7, A.8.16 | Email + Webhook |
 | THR-02 | Threat intel | Traffic ไป/มาจาก IOC และ firewall ปล่อยผ่าน | IP ตรงกับ TI list และ `fw_action:pass` | High | A.5.7 | Email + Webhook |
 | THR-03 | Threat intel / DNS | DNS query ไป domain อันตราย | domain ตรงกับ TI list (phishing/C2) | High | A.5.7, A.8.23 | Email + Webhook |
+| WEB-01 | Web filtering | เข้าหมวดที่ถูกบล็อกซ้ำ | DNS query หมวด `block` (พนัน, ลามก, ยาเสพติด, P2P, malware) ≥ 10 ครั้ง/ชม. ต่อ `src_ip` | Medium | A.8.23 | Email |
+| WEB-02 | Web filtering | พยายามเลี่ยง DNS filtering | ถูกบล็อกตอนออก DoT 853, DNS 53 ไปเซิร์ฟเวอร์ภายนอก หรือ DoH resolver ≥ 3 ครั้ง/5 นาที | Medium | A.8.23, A.8.20 | Email |
 | OPS-01 | Log health | OPNsense หยุดส่ง log | ไม่มี log จาก OPNsense ใน 5 นาที | High | A.8.15, A.8.16 | Email + Webhook |
 
 > คอลัมน์ "แจ้งเตือน" แสดงพฤติกรรมของ POC ส่วนใน production ทุก alert ส่ง **Email อย่างเดียว** ตาม Q4
@@ -329,7 +331,7 @@ RAM: ≤ 50 EPS ใช้ 8 GB รวม (OpenSearch heap 2 GB, Graylog heap 1�
 1. OPNsense จริงส่ง log เข้า Graylog ได้ และแสดงผลภายใน 10 วินาที
 2. filterlog ≥ 95% parse สำเร็จ (ไม่มี `gl2_processing_error`)
 3. สำหรับ incident ตัวอย่าง ทีมตอบได้ภายใน 1 นาทีว่า ใคร / เครื่องไหน / จาก zone ไหน / ไปที่ไหน / rule ไหน
-4. Alert ทั้ง 11 ข้อทำงาน และแจ้งเตือนถึง Email/Webhook ภายใน 2 นาที
+4. Alert ทั้ง 13 ข้อทำงาน และแจ้งเตือนถึง Email/Webhook ภายใน 2 นาที
 5. ทีมสาธิต walkthrough แบบที่จะทำให้ auditor ดูได้ (alert → สืบสวน → หลักฐาน)
 
 ## 11. Roadmap
@@ -381,13 +383,13 @@ RAM: ≤ 50 EPS ใช้ 8 GB รวม (OpenSearch heap 2 GB, Graylog heap 1�
 | กลุ่ม | นโยบายในเอกสาร | ทำได้แค่ไหน | SIEM ตรวจอย่างไร |
 |---|---|---|---|
 | Security risks (malware, phishing, C2, cryptomining) | Block เสมอ | ✅ DNS blocklist + Suricata + reputation alias | THR-01/02/03 ✅ |
-| Illegal & unethical (พนัน, ลามก, ยาเสพติด, อาวุธ, ความรุนแรง) | Block เสมอ | ◐ DNS blocklist ครอบคลุมพนัน/ลามก/ยาเสพติด ส่วนอาวุธ/ความรุนแรงยังไม่มี list ฟรีที่ครอบคลุมดี | WEB-01 (ใหม่) |
+| Illegal & unethical (พนัน, ลามก, ยาเสพติด, อาวุธ, ความรุนแรง) | Block เสมอ | ◐ DNS blocklist ครอบคลุมพนัน/ลามก/ยาเสพติด ส่วนอาวุธ/ความรุนแรงยังไม่มี list ฟรีที่ครอบคลุมดี | WEB-01 ✅ POC |
 | Bandwidth abusers (P2P, streaming, cloud storage) | Block / quota / limit | ✅ (Q13) **P2P: block** ด้วย blocklist + Suricata P2P · streaming/cloud storage: **monitor** | Dashboard top talkers + RPT-01 |
 | Productivity loss (social, เกม, หางาน, หาคู่) | Warn / time-based | ➖ (Q13) **monitor อย่างเดียว** ตาม Acceptable Use Policy เพราะไม่มี warn page และ time-based block ไม่แม่นกับเว็บที่ใช้ CDN | รายงาน DNS ตามหมวด (RPT-01) |
 | Business & general | Allow + monitor & log | ✅ DNS query log → stream `OPNsense - dns` (FR-05) | ✅ |
 | Unrated / NRDs (โดเมนจดใหม่) | Block / warn / review | ◐ ใส่ NRD blocklist สาธารณะเป็น custom blocklist ของ Unbound | Review รายสัปดาห์ |
 
-**Use case ใหม่สำหรับ SIEM (FR-17)**
+**Use case ใหม่สำหรับ SIEM (FR-17)**: WEB-01 และ WEB-02 ทำงานใน POC แล้ว (category มาจาก `web_categories.csv`, การเลี่ยง DNS มาจาก tag `dns-bypass` ใน `fw_rules.csv`) ส่วน RPT-01 ยังไม่ทำ
 
 | ID | Alert | Logic (ร่าง) | ISO |
 |---|---|---|---|

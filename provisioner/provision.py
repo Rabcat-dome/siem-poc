@@ -93,8 +93,12 @@ LOOKUPS = [
     ("asset-criticality", "assets.csv", "ip", "criticality", False, None),
     ("network-zones", "network_zones.csv", "cidr", "zone", True, "Internet"),
     ("fw-rules", "fw_rules.csv", "rid", "description", False, None),
+    ("fw-rule-tag", "fw_rules.csv", "rid", "tag", False, None),
     ("threat-intel-ip", "threat_intel_ip.csv", "ip", "category", False, None),
     ("threat-intel-domain", "threat_intel_domain.csv", "domain", "category", False, None),
+    # web filtering: same domains as the Unbound blocklists, with the company policy per category
+    ("web-category", "web_categories.csv", "domain", "category", False, None),
+    ("web-policy", "web_categories.csv", "domain", "policy", False, None),
 ]
 
 
@@ -178,6 +182,7 @@ STREAMS = [
     ("OPNsense - dhcp", "DHCP leases (IP -> MAC -> hostname)"),
     ("OPNsense - dns", "Unbound DNS queries"),
     ("SIEM - Threat intel hits", "Any message that matched a threat-intel IOC"),
+    ("SIEM - Web filtering", "Categorised DNS queries and attempts to bypass the DNS filter"),
 ]
 
 
@@ -247,8 +252,9 @@ def ensure_notifications():
 LOW, MEDIUM, HIGH = 1, 2, 3
 
 
-def alert(title, desc, priority, query, streams, window_min=5, group_by=(), series=None, cond=None):
-    """series=("count", None) or ("card", "dst_port"); cond=(">=", 15)."""
+def alert(title, desc, priority, query, streams, window_min=5, group_by=(), series=None, cond=None, grace_min=5):
+    """series=("count", None) or ("card", "dst_port"); cond=(">=", 15).
+    grace_min: after a notification, stay quiet this long for the same alert."""
     cfg = {"type": "aggregation-v1", "query": query, "query_parameters": [], "filters": [],
            "streams": streams, "group_by": list(group_by),
            "search_within_ms": window_min * 60_000, "execute_every_ms": 60_000,
@@ -259,14 +265,15 @@ def alert(title, desc, priority, query, streams, window_min=5, group_by=(), seri
         cfg["series"] = [{"id": sid, "type": func, **({"field": field} if field else {})}]
         cfg["conditions"] = {"expression": {"expr": cond[0], "left": {"expr": "number-ref", "ref": sid},
                                             "right": {"expr": "number", "value": cond[1]}}}
-    return {"title": title, "description": desc, "priority": priority, "config": cfg}
+    return {"title": title, "description": desc, "priority": priority, "config": cfg,
+            "notification_settings": {"grace_period_ms": grace_min * 60_000, "backlog_size": 5}}
 
 
 def ensure_alerts(streams, email_id, webhook_id):
     s = streams
-    fw, ids, auth, conf, vpn, dns, ti = (s["OPNsense - firewall"], s["OPNsense - ids"], s["OPNsense - auth"],
-                                         s["OPNsense - config"], s["OPNsense - vpn"], s["OPNsense - dns"],
-                                         s["SIEM - Threat intel hits"])
+    fw, ids, auth, conf, vpn, ti, web = (s["OPNsense - firewall"], s["OPNsense - ids"], s["OPNsense - auth"],
+                                         s["OPNsense - config"], s["OPNsense - vpn"],
+                                         s["SIEM - Threat intel hits"], s["SIEM - Web filtering"])
     definitions = [
         alert("[NET-01] Port scan from single source",
               ">= 15 distinct destination ports blocked from one source within 1 minute.",
@@ -305,6 +312,16 @@ def ensure_alerts(streams, email_id, webhook_id):
               "Internal host resolved a domain on the threat-intel list (phishing / C2).",
               HIGH, "event_category:dns", [ti], 5,
               ["src_ip", "dns_query", "threat_category"], ("count", None), (">=", 1)),
+        alert("[WEB-01] Repeated access to blocked web category",
+              ">= 10 DNS queries to blocked categories (gambling, adult, drugs, p2p, malware) from one host "
+              "within 1 hour - policy violation or infected host (ISO A.8.23).",
+              MEDIUM, "web_policy:block", [web], 60, ["src_ip", "src_zone"], ("count", None), (">=", 10),
+              grace_min=60),
+        alert("[WEB-02] Attempt to bypass DNS filtering",
+              ">= 3 blocked connections to DoT (853), outside DNS (53) or DoH resolvers from one host "
+              "within 5 minutes (ISO A.8.23 / A.8.20).",
+              MEDIUM, "fw_rule_tag:dns\\-bypass", [web], 5, ["src_ip", "src_zone"], ("count", None), (">=", 3),
+              grace_min=60),
         alert("[OPS-01] OPNsense log source silent",
               "No OPNsense logs for 5 minutes - logging failure or tampering (ISO A.8.15 / A.8.16).",
               HIGH, "event_source:opnsense", [DEFAULT_STREAM], 5, (), ("count", None), ("<", 1)),
@@ -315,7 +332,6 @@ def ensure_alerts(streams, email_id, webhook_id):
         if d["priority"] >= HIGH:
             notify.append({"notification_id": webhook_id})
         d.update({"alert": True, "field_spec": {}, "key_spec": [],
-                  "notification_settings": {"grace_period_ms": 300_000, "backlog_size": 5},
                   "notifications": notify,
                   "storage": [{"type": "persist-to-streams-v1", "streams": [EVENTS_STREAM]}]})
         if d["title"] in existing:

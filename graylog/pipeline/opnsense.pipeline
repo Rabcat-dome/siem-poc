@@ -18,11 +18,15 @@ stage 1 match pass
   rule "enrich: source asset owner (who)";
   rule "enrich: destination asset";
   rule "enrich: firewall rule description";
+  rule "enrich: firewall rule tag";
   rule "threat intel: destination IP is an IOC";
   rule "threat intel: source IP is an IOC";
   rule "threat intel: DNS query to IOC domain";
   rule "enrich: local hour (for after-hours detection)";
+  rule "web filter: category of DNS query";
+  rule "web filter: category of parent domain";
 stage 2 match pass
   rule "route: OPNsense category stream";
   rule "route: threat intel hits";
+  rule "route: web filtering";
 end

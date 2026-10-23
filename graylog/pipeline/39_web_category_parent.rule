@@ -1,0 +1,9 @@
+rule "web filter: category of parent domain"
+when
+  has_field("dns_parent") &&
+  is_null(lookup_value("web-category", to_string($message.dns_query))) &&
+  is_not_null(lookup_value("web-category", to_string($message.dns_parent)))
+then
+  set_field("web_category", lookup_value("web-category", to_string($message.dns_parent)));
+  set_field("web_policy", lookup_value("web-policy", to_string($message.dns_parent)));
+end

@@ -49,7 +49,14 @@ ADMIN_WS = "192.168.99.10"
 VPN_USERS = ["somchai.k", "suda.p", "narin.t"]
 
 BENIGN_DOMAINS = ["www.google.com", "outlook.office365.com", "teams.microsoft.com", "line.me",
-                  "www.facebook.com", "github.com", "api.ipify.org", "www.bot.or.th", "s3.amazonaws.com"]
+                  "www.facebook.com", "github.com", "api.ipify.org", "www.bot.or.th", "s3.amazonaws.com",
+                  # allowed but monitored categories (social, streaming, cloud storage) - see web_categories.csv
+                  "www.youtube.com", "www.tiktok.com", "www.instagram.com", "www.netflix.com", "drive.google.com"]
+# blocked categories (gambling, adult, drugs, p2p) - must match graylog/lookup/web_categories.csv
+BLOCKED_DOMAINS = ["thaicasino-bet.example", "www.slot-888.example", "adult-videos.example",
+                   "drugs-shop.example", "torrent-tracker.example", "piratebay-mirror.example"]
+# public resolvers people use to dodge the company DNS filter
+PUBLIC_RESOLVERS = ["1.1.1.1", "8.8.8.8", "8.8.4.4", "9.9.9.9"]
 BENIGN_IPS = ["142.250.198.4", "52.97.146.162", "13.107.42.14", "147.92.146.52",
               "157.240.7.35", "140.82.112.4", "52.219.168.6"]
 INTERNET_NOISE_SRC = ["198.51.100.23", "198.51.100.41", "192.0.2.77", "203.0.113.150", "192.0.2.13"]
@@ -68,6 +75,9 @@ RULES = {
     "allow_vpn_servers": (90, "96f5c0b74e022e0b375c24619797b391"),
     "nat_web01_https": (60, "eb6626d0c4b46f3a0eeb127e5b61a10f"),
     "allow_mgmt_gui": (95, "af86d0924bb78bc5d8a2af2d2ce9cc33"),
+    "block_dot": (81, "ac87eb2b3711486a4c03407afdd88ca1"),
+    "block_ext_dns": (82, "03fe13e5c8ecd0709616f808ff1ef77d"),
+    "block_doh": (83, "9ea229df30c0603a9175d5a88b0344e3"),
 }
 
 # syslog facility codes
@@ -263,13 +273,31 @@ def sc_ids_web_attack():
              1, "TCP", SCANNER_IP, eport(), SERVERS["web"], 443)
 
 
+def sc_blocked_category():
+    # Unbound blocklist answers 0.0.0.0, so only the DNS queries show up - no connection follows
+    ip = LAN_CLIENTS[2][0]  # LT-ANAN
+    for _ in range(random.randint(10, 15)):
+        dns_query(ip, random.choice(BLOCKED_DOMAINS))
+
+
+def sc_dns_bypass():
+    # DoT, plain DNS to an outside resolver and DoH, all stopped by the firewall
+    ip, _, _ = random.choice([LAN_CLIENTS[0], GUEST_CLIENTS[1]])
+    iface = IFACE["guest"] if ip.startswith("192.168.30.") else IFACE["lan"]
+    for _ in range(random.randint(2, 4)):
+        filterlog("block_dot", iface, "block", "in", "tcp", ip, random.choice(PUBLIC_RESOLVERS[:2]), eport(), 853)
+        filterlog("block_ext_dns", iface, "block", "in", "udp", ip, random.choice(PUBLIC_RESOLVERS), eport(), 53)
+        filterlog("block_doh", iface, "block", "in", "tcp", ip, PUBLIC_RESOLVERS[3], eport(), 443)
+
+
 def sc_vpn_login_ok():
     user = random.choice(VPN_USERS)
     vpn_login(user, f"{random.choice([49, 58, 171])}.{random.randint(1, 254)}.{random.randint(1, 254)}.{random.randint(1, 254)}", ok=True)
 
 
 SCENARIOS = [sc_port_scan, sc_gui_bruteforce, sc_admin_login_unusual, sc_config_change, sc_c2_beacon,
-             sc_phishing_dns, sc_vpn_bruteforce, sc_guest_lateral, sc_ids_web_attack, sc_vpn_login_ok]
+             sc_phishing_dns, sc_vpn_bruteforce, sc_guest_lateral, sc_ids_web_attack, sc_vpn_login_ok,
+             sc_blocked_category, sc_dns_bypass]
 
 
 def play(names):

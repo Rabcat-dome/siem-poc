@@ -1,0 +1,8 @@
+rule "enrich: firewall rule tag"
+when
+  has_field("fw_rule_id") &&
+  to_string(lookup_value("fw-rule-tag", to_string($message.fw_rule_id))) != ""
+then
+  // tags come from the "tag" column of fw_rules.csv, e.g. dns-bypass
+  set_field("fw_rule_tag", lookup_value("fw-rule-tag", to_string($message.fw_rule_id)));
+end

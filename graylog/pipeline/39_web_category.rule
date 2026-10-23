@@ -1,0 +1,8 @@
+rule "web filter: category of DNS query"
+when
+  has_field("dns_query") &&
+  is_not_null(lookup_value("web-category", to_string($message.dns_query)))
+then
+  set_field("web_category", lookup_value("web-category", to_string($message.dns_query)));
+  set_field("web_policy", lookup_value("web-policy", to_string($message.dns_query)));
+end

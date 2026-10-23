@@ -10,4 +10,7 @@ then
   set_field("src_ip", m["src_ip"]);
   set_field("dns_query", lowercase(to_string(m["dns_query"])));
   set_field("dns_qtype", m["dns_qtype"]);
+  // parent domain (www.facebook.com -> facebook.com) so category lists match subdomains
+  let p = regex("^[^.]+\\.(.+\\..+)$", lowercase(to_string(m["dns_query"])), ["parent"]);
+  set_field("dns_parent", p["parent"]);
 end
