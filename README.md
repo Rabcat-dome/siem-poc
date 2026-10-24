@@ -4,6 +4,7 @@ POC สำหรับเตรียมตรวจ ISO/IEC 27001:2022 โด�
 
 - Requirement (ภาษาไทย, ใช้คุยร่วมกัน): [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md)
 - Diagram (architecture, log journey, alert perspectives, integration points): [docs/architecture.html](docs/architecture.html) เปิดใน browser
+- Tech stack: container แต่ละตัวใน Docker Desktop ทำอะไร และ production ต่างจาก POC อย่างไร: [docs/tech-stack.html](docs/tech-stack.html) เปิดใน browser
 - Network architecture และคู่มือติดตั้ง OPNsense ในออฟฟิศ (เอกสารส่งมอบ): [docs/NETWORK-ARCHITECTURE.md](docs/NETWORK-ARCHITECTURE.md)
 
 ```mermaid
