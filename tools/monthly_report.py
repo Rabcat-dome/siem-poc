@@ -103,6 +103,19 @@ def alerts(period):
         page += 1
 
 
+def incidents(events):
+    """-> Counter((title, priority) -> incidents). The High threshold alerts look back further than they run
+    (sliding window), so one burst raises an event every minute until it leaves the window. Events of the
+    same alert and group-by values whose time ranges overlap count the same logs, so they are one incident."""
+    last_end, n = {}, Counter()
+    for e in sorted(events, key=lambda e: e["timerange_start"]):  # Graylog ISO-8601 UTC strings sort as text
+        key = (e["event_definition_id"], tuple(sorted((e.get("group_by_fields") or {}).items())))
+        if key not in last_end or e["timerange_start"] >= last_end[key]:
+            n[(e["message"].split(":")[0], PRIORITY.get(e.get("priority"), e.get("priority")))] += 1
+        last_end[key] = e["timerange_end"]
+    return n
+
+
 # --- HTML -----------------------------------------------------------------
 
 def esc(v):
@@ -148,18 +161,22 @@ def build(period):
         day += timedelta(days=1)
 
     events = alerts(period)
-    by_alert = Counter((e["message"].split(":")[0], PRIORITY.get(e.get("priority"), e.get("priority"))) for e in events)
-    alert_rows = [(title, prio, n) for (title, prio), n in by_alert.most_common()]
+    by_alert = incidents(events)
+    rows_in_graylog = Counter(e["message"].split(":")[0] for e in events)
+    alert_rows = [(title, prio, n, rows_in_graylog[title]) for (title, prio), n in by_alert.most_common()]
+    n_incidents = sum(by_alert.values())
 
     s = []
     s.append(section("1. ภาพรวม", "A.8.15 Logging · A.8.16 Monitoring",
-                     f"log ทั้งหมด {total:,} รายการ และ alert {len(events):,} ครั้ง "
+                     f"log ทั้งหมด {total:,} รายการ และ alert {n_incidents:,} เหตุการณ์ "
                      f"มีวันที่ไม่มี log จาก OPNsense {len(silent)} วัน",
                      table(["หมวด log", "จำนวน"], by_cat)
                      + (f'<p class="warn">วันที่ไม่มี log: {", ".join(silent)} ต้องตรวจสอบว่า firewall หรือ logging หยุดทำงานหรือไม่</p>' if silent else "")))
     s.append(section("2. Alert", "A.5.24–A.5.26 Incident management",
-                     "จำนวน alert แยกตาม use case ทุก alert ระดับ High ควรมี ticket/บันทึกการตรวจสอบแนบ",
-                     table(["Alert", "Priority", "จำนวนครั้ง"], alert_rows)))
+                     "จำนวน alert แยกตาม use case นับเป็นเหตุการณ์ alert ระดับ High ที่นับเกณฑ์ (เช่น brute force) "
+                     "ขึ้นในหน้า Alerts ของ Graylog ซ้ำทุกนาทีระหว่างที่ log ยังอยู่ในช่วงที่ตรวจ แถวที่ช่วงเวลาทับกัน"
+                     "จึงรวมเป็นเหตุการณ์เดียว ทุก alert ระดับ High ควรมี ticket/บันทึกการตรวจสอบแนบ",
+                     table(["Alert", "Priority", "เหตุการณ์", "แถวใน Graylog"], alert_rows)))
     s.append(section("3. Web filtering", "A.8.23 Web filtering",
                      "หมวดเว็บที่ถูกบล็อก เครื่องที่พยายามเข้าบ่อย และการพยายามเลี่ยง DNS filtering",
                      "<h3>หมวดที่ถูกบล็อก</h3>" + table(["หมวด", "จำนวน query"], aggregate(period, DNS_BLOCKED, ["web_category"]))
@@ -215,7 +232,7 @@ def build(period):
                      + (table(["เครื่อง", "Path", "ใช้สูงสุด (%)"], [(h, p, v) for (h, p), v in sorted(highest.items())]) if highest else "")))
     s.append(section("10. ความต่อเนื่องของ log รายวัน", "A.8.15 · A.8.16", "จำนวน log จาก OPNsense ต่อวัน",
                      table(["วันที่", "จำนวน log"], days)))
-    return s, total, len(events)
+    return s, total, n_incidents
 
 
 PAGE = """<!doctype html><html lang="th"><head><meta charset="utf-8">
@@ -260,14 +277,14 @@ def main():
     path = os.path.join(args.out, f"RPT-01_{period.label}.html")
     with open(path, "w", encoding="utf-8") as f:
         f.write(page)
-    print(f"wrote {path}: {total:,} log messages, {n_alerts} alerts")
+    print(f"wrote {path}: {total:,} log messages, {n_alerts} alert incidents")
 
     if args.email_to:
         msg = EmailMessage()
         msg["Subject"] = f"[SIEM] RPT-01 รายงานประจำ {period.label}"
         msg["From"] = os.getenv("REPORT_FROM", "siem-poc@example.local")
         msg["To"] = args.email_to
-        msg.set_content(f"รายงาน RPT-01 ช่วง {period.label}: log {total:,} รายการ, alert {n_alerts} ครั้ง ดูไฟล์แนบ")
+        msg.set_content(f"รายงาน RPT-01 ช่วง {period.label}: log {total:,} รายการ, alert {n_alerts} เหตุการณ์ ดูไฟล์แนบ")
         msg.add_attachment(page.encode("utf-8"), maintype="text", subtype="html", filename=os.path.basename(path))
         with smtplib.SMTP(os.getenv("SMTP_HOST", "localhost"), int(os.getenv("SMTP_PORT", "25")), timeout=30) as smtp:
             if os.getenv("SMTP_STARTTLS", "false").lower() == "true":

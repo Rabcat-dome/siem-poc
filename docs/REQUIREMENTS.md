@@ -115,7 +115,7 @@ ISMS scope ครอบคลุม**ทั้งบริษัท สำนั
 | NFR-06 | **Capacity** | ✅ (Q6) < 50 คน ≈ ≤ 50 EPS: 4 vCPU / RAM 8 GB / disk 500 GB รองรับ EPS × 2 · ไม่วัด EPS จริง ใช้ `tools/disk_check.py` ทุกชั่วโมงแทน ถ้า disk ใช้ถึง 75% จะเกิด OPS-03 ให้ขยาย disk ก่อน OpenSearch หยุดเขียนที่ 95% | A.8.6 |
 | NFR-07 | **Backup** | Backup config ของ SIEM (MongoDB) และ pipeline/alert ในรูปแบบ code (repo นี้) · ✅ `deploy/backup.sh` ทุกคืน (MongoDB, config เข้ารหัส, config.xml ของ OPNsense) ทดสอบ restore แล้ว | A.8.13 |
 | NFR-08 | **PDPA** | log มีข้อมูลส่วนบุคคล (IP, username) จึงต้องระบุวัตถุประสงค์ จำกัดสิทธิ์เข้าถึง และกำหนดระยะเวลาเก็บ | A.5.34 |
-| NFR-09 | **Alert latency** | Alert ถึงผู้รับภายใน 2 นาทีหลังเกิดเหตุ | A.8.16 |
+| NFR-09 | **Alert latency** | Alert ถึงผู้รับภายใน 2 นาทีหลังเกิดเหตุ ยกเว้น alert ระดับ Medium/Low ที่นับเกณฑ์ (WEB-01, WEB-02, NET-04) ซึ่งตรวจเป็นรอบไม่ทับกันเพื่อไม่ให้ incident เดียวขึ้นซ้ำหลายแถว จึงถึงภายในหนึ่งรอบ (WEB-02 5 นาที, NET-04 10 นาที, WEB-01 1 ชั่วโมง) ดูหมายเหตุใต้ตารางหัวข้อ 6 · POC ✅ วัดเมื่อ 2026-10-24 | A.8.16 |
 | NFR-10 | **Response SLA** | ✅ (Q3) IT in-house รับ alert, High: เริ่มตรวจสอบภายใน 1 ชม. ในเวลาทำการ / ภายใน 2 ชม. แรกของวันทำการถัดไปถ้าเกิดนอกเวลา (นอกเวลาเป็น best effort) | A.5.24, A.5.26 |
 | NFR-11 | **Log hashing** | สร้าง manifest SHA-256 ของไฟล์ archive ทุกวัน เก็บไว้ใน folder WriteOnce แยกจากไฟล์ log และสุ่มตรวจ hash ทุกเดือน (บันทึกผลเป็นหลักฐาน) · POC ✅ `tools/log_manifest.py` + alert OPS-02 | A.8.15, A.5.28 |
 
@@ -164,6 +164,16 @@ RAM: ≤ 50 EPS ใช้ 8 GB รวม (OpenSearch heap 2 GB, Graylog heap 1�
 > คอลัมน์ "แจ้งเตือน" แสดงพฤติกรรมของ POC ส่วนใน production ทุก alert ส่ง **Email อย่างเดียว** ตาม Q4
 >
 > NET-03/04, IAM-05/06 และ CHG-02 ทำงานกับ log จำลองของ switch/AP (Q9) เมื่อได้รุ่นจริงต้องแก้เฉพาะ parse rule (`graylog/pipeline/6*.rule`) ส่วน alert ไม่ต้องแก้ ตราบที่ rule ใหม่ตั้ง field ชื่อเดิม
+>
+> **รอบตรวจ (ตัดสินใจ 2026-10-24):** ถ้า alert ดูย้อนหลังนานกว่ารอบที่ตรวจ log เดิมจะถูกนับซ้ำในรอบถัดไป incident เดียวจึงขึ้นหลายแถว (อีเมลยังส่งครั้งเดียวเพราะ grace period) จึงตั้งไว้ 3 แบบ
+>
+> | กลุ่ม | Alert | ดูย้อน / ตรวจทุก | ผล |
+> |---|---|---|---|
+> | เจอครั้งเดียวก็แจ้ง | IAM-02/03/06, CHG-01/02, THR-01/02/03, NET-03, OPS-02/03 และ NET-01 | 1 นาที / 1 นาที | ไม่ซ้ำ แจ้งภายใน 1 นาที |
+> | High ที่นับเกณฑ์ | NET-02, IAM-01, IAM-04, IAM-05 และ OPS-01 | 5 นาที / 1 นาที (หน้าต่างเลื่อน) | แจ้งเร็วและไม่พลาด burst แต่ขึ้นซ้ำได้ ≤ 5 แถวต่อ incident (OPS-01 ซ้ำทุกนาทีตลอดที่ log หาย) |
+> | Medium/Low ที่นับเกณฑ์ | WEB-02, NET-04, WEB-01 | 5/5, 10/10, 60/60 นาที | ไม่ซ้ำ แต่แจ้งช้าสุดหนึ่งรอบ และ burst ที่คร่อมรอยต่อสองรอบอาจไม่ถึงเกณฑ์ |
+>
+> RPT-01 รวมแถวที่ช่วงเวลาทับกันของ alert และต้นทางเดียวกันเป็นเหตุการณ์เดียว ส่วนตัวเลขบน dashboard ยังนับแถว ข้อจำกัดของแบบไม่ทับกัน: log ที่มาถึงหลังรอบของมันถูกตรวจไปแล้ว (นาฬิกาอุปกรณ์ช้า หรือ syslog แบบ TLS ที่ค้างส่งระหว่าง SIEM restart) จะไม่ทำให้เกิด alert ทดสอบแล้วว่า log ที่ timestamp ย้อน 3 นาทีไม่เกิด THR-02 จึงพึ่ง NTP ตาม NFR-02 และวัดความหน่วงของอุปกรณ์จริงใน Phase 1 (หัวข้อ 9)
 
 **Use case ที่แนะนำให้ทำต่อ (Phase 1–2)**
 
@@ -234,7 +244,7 @@ RAM: ≤ 50 EPS ใช้ 8 GB รวม (OpenSearch heap 2 GB, Graylog heap 1�
 | Q15 | สำเนา archive นอก site | ยอมรับความเสี่ยง |
 | Q16 | Log Administrator | IT ใช้ role จำกัด, ผู้บริหารถือ admin (break-glass) |
 
-**ข้อมูลที่ยังต้องหาเพิ่ม** (อัปเดต 2026-10-23)
+**ข้อมูลที่ยังต้องหาเพิ่ม** (อัปเดต 2026-10-24)
 
 > ตาม scope ของ POC (หัวข้อ 3) ข้อที่ยังไม่ติ๊กไม่ใช่เงื่อนไขผ่าน POC ข้อที่ต้องใช้อุปกรณ์หรือ log จริงทำใน Phase 1 ส่วนข้อกฎหมาย, risk acceptance และ antivirus เป็นงานของเจ้าของ ISMS
 
@@ -246,6 +256,7 @@ RAM: ≤ 50 EPS ใช้ 8 GB รวม (OpenSearch heap 2 GB, Graylog heap 1�
 - [ ] ผู้บริหารเซ็น risk acceptance: firewall ไม่มีเครื่องสำรอง (Q12), Guest ระบุตัวได้แค่ MAC (Q5), NAS/Windows ไม่ได้ส่ง log เข้า SIEM (Q9) และไม่มีสำเนา log นอก site (Q15)
 - [x] **Unbound blocklist และ log ของ query ที่ถูก block (หัวข้อ 12.2):** **ตัดสินใจ:** จำลองไว้ก่อน simulator ส่งบรรทัดแบบ `log-local-actions` ของ Unbound เช่น `info: slot-888.example. always_null 192.168.10.23@51234 www.slot-888.example. A IN` แล้ว rule `19b_parse_dns_blocked` ตั้ง `event_type:dns_blocked` ให้ WEB-01, dashboard และ RPT-01 นับ ตอนต่อเครื่องจริงให้เทียบรูปแบบกับ log จริง ถ้าต่างให้แก้ rule 19b ถ้าเครื่องจริงไม่ log query ที่ถูก block ให้เปลี่ยน `DNS_BLOCKED` ใน `provision.py` และ `monthly_report.py` เป็น `web_policy:block` (lookup หมวดจาก `web_categories.csv` แทน)
 - [ ] ยืนยันว่าทุกเครื่องมี antivirus (เช่น Microsoft Defender) เปิดอยู่และอัปเดต เพราะเป็น compensating control หลักของ Q14
+- [ ] **ความหน่วงของ log จากอุปกรณ์จริง (Phase 1):** alert ส่วนใหญ่ตรวจเป็นรอบไม่ทับกัน (หมายเหตุใต้ตารางหัวข้อ 6) log ที่มาช้ากว่ารอบจะไม่เกิด alert ให้ค้น `gl2_receive_timestamp` ลบ `timestamp` แยกตาม `source` ทั้งในวันปกติและหลัง restart SIEM ถ้าอุปกรณ์ไหนช้าเกินไม่กี่วินาที ให้แก้ NTP ของอุปกรณ์นั้นก่อน ถ้ายังช้าอยู่ให้เปลี่ยน alert กลุ่ม "เจอครั้งเดียวก็แจ้ง" เป็นดูย้อน 2 นาที ตรวจทุก 1 นาที (ทน log ช้าได้ 1 นาที แต่ incident ขึ้นได้ 2 แถว)
 - [x] **การต่อ ISP:** ADSL, public IP ไม่ fixed แต่ทำ DDNS ได้ ดูผลกระทบใน [NETWORK-ARCHITECTURE หัวข้อ 7](NETWORK-ARCHITECTURE.md#7-การต่อกับ-isp-decision-record)
 
 **รายละเอียดแต่ละข้อ**
@@ -351,16 +362,18 @@ RAM: ≤ 50 EPS ใช้ 8 GB รวม (OpenSearch heap 2 GB, Graylog heap 1�
 1. simulator ส่ง log ครบทุกประเภท (OPNsense, switch, Wi-Fi AP และ job ของเครื่อง SIEM) และแสดงใน Graylog ภายใน 10 วินาที
 2. pipeline test ผ่านทุกเคส (`tests/run_pipeline_tests.py`) และไม่มี `gl2_processing_error`
 3. **ความครบถ้วนของการ visualize:** `tools/viz_check.py` ไม่มี FAIL คือทุก widget ใน dashboard มีข้อมูล, ทุก `event_type` ที่ simulator ส่งมีอย่างน้อย 1 widget ที่แสดงรายละเอียด (ไม่ใช่แค่กราฟปริมาณตามเวลา) และ field who / what / where ของแต่ละ `event_type` มีค่า ≥ 95%
-4. Alert ทั้ง 20 ข้อเกิดได้จาก scenario ของ simulator (`--play all` ส่วน OPS-01 ทดสอบโดยหยุด simulator) และแจ้งเตือนถึง Email/Webhook ภายใน 2 นาที
+4. Alert ทั้ง 20 ข้อเกิดได้จาก scenario ของ simulator (`--play all` ส่วน OPS-01 ทดสอบโดยหยุด simulator) และแจ้งเตือนถึง Email/Webhook ตาม NFR-09 คือภายใน 2 นาที ยกเว้น WEB-02, NET-04 และ WEB-01 ที่ถึงภายในหนึ่งรอบตรวจ (5 นาที, 10 นาที, 1 ชั่วโมง)
 5. สำหรับ incident ตัวอย่าง ทีมตอบได้ภายใน 1 นาทีจาก dashboard ว่า ใคร / เครื่องไหน / จาก zone ไหน / ไปที่ไหน / rule ไหน
 6. ทีมสาธิต walkthrough แบบที่จะทำให้ auditor ดูได้ (alert → สืบสวน → หลักฐาน)
+
+บทซ้อมของข้อ 5–6 (drill 3 incident พร้อมคำตอบที่ถูก, ขั้นตอน walkthrough และหลักฐานที่ต้องเก็บ) อยู่ใน [WALKTHROUGH.md](WALKTHROUGH.md)
 
 ## 11. Roadmap
 
 | Phase | ระยะเวลา (ประมาณ) | งาน |
 |---|---|---|
 | 0 POC | 1–2 สัปดาห์ | repo นี้ด้วย**ข้อมูลจำลองทั้งหมด**: simulator, pipeline test, alert 20 ข้อ, dashboard 5 ชุด และ VIZ-CHECK ผ่านตามหัวข้อ 10 (ไม่ทดสอบกับของจริง) |
-| 1 Pilot | 2–4 สัปดาห์ | **เริ่มทดสอบกับของจริง:** OPNsense ทดสอบบนเครื่อง x86 + `traffic-generator`, ต่อ OPNsense จริงแล้วเทียบรูปแบบ log (รวม Unbound blocklist) กับ rule, ยืนยันรุ่น NAS และการ์ด network · ซื้อและติดตั้งเครื่อง SIEM ใน Management VLAN (Q7), index set 90 วัน (Q2), Synology WriteOnce (Q10), SMTP บริษัท (Q4), DHCP static mapping + sync asset CSV ด้วย `tools/sync_assets.py` กับ OPNsense จริง (Q5), IDS mode (Q8), backup config OPNsense (Q12), DNS web filtering + บล็อก DoH/DoT (FR-16), SHA-256 manifest (NFR-11), NTP ตาม NFR-02, TLS, RBAC/MFA ตาม Q16 และ dashboard |
+| 1 Pilot | 2–4 สัปดาห์ | **เริ่มทดสอบกับของจริง:** OPNsense ทดสอบบนเครื่อง x86 + `traffic-generator`, ต่อ OPNsense จริงแล้วเทียบรูปแบบ log (รวม Unbound blocklist) กับ rule, ยืนยันรุ่น NAS และการ์ด network · ซื้อและติดตั้งเครื่อง SIEM ใน Management VLAN (Q7), index set 90 วัน (Q2), Synology WriteOnce (Q10), SMTP บริษัท (Q4), DHCP static mapping + sync asset CSV ด้วย `tools/sync_assets.py` กับ OPNsense จริง (Q5), IDS mode (Q8), backup config OPNsense (Q12), DNS web filtering + บล็อก DoH/DoT (FR-16), SHA-256 manifest (NFR-11), NTP ตาม NFR-02 และวัดความหน่วงของ log จากอุปกรณ์จริง (หัวข้อ 9), TLS, RBAC/MFA ตาม Q16 และ dashboard |
 | 2 Expand | 1–2 เดือน | Switch / Wi-Fi AP จริง (Q9): แก้ parse rule จำลองให้ตรงรุ่นจริง, TI feed ภายนอก |
 | 3 Operate | ต่อเนื่อง | review alert รายสัปดาห์, report รายเดือน, tabletop exercise, tune rule |
 

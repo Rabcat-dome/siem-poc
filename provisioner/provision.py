@@ -307,12 +307,17 @@ def ensure_notifications():
 LOW, MEDIUM, HIGH = 1, 2, 3
 
 
-def alert(title, desc, priority, query, streams, window_min=5, group_by=(), series=None, cond=None, grace_min=5):
+def alert(title, desc, priority, query, streams, window_min=5, group_by=(), series=None, cond=None, grace_min=5,
+          every_min=1):
     """series=("count", None) or ("card", "dst_port"); cond=(">=", 15).
+    window_min: how far back each run looks; every_min: how often it runs. A window longer than the interval
+    counts the same logs again on the next runs, so one incident becomes several events (the grace period
+    still sends one e-mail). Single-hit alerts therefore use 1/1, Medium/Low threshold alerts run once per
+    window, and only the High threshold alerts keep a sliding window to stay fast (NFR-09).
     grace_min: after a notification, stay quiet this long for the same alert."""
     cfg = {"type": "aggregation-v1", "query": query, "query_parameters": [], "filters": [],
            "streams": streams, "group_by": list(group_by),
-           "search_within_ms": window_min * 60_000, "execute_every_ms": 60_000,
+           "search_within_ms": window_min * 60_000, "execute_every_ms": every_min * 60_000,
            "use_cron_scheduling": False, "event_limit": 100, "series": [], "conditions": None}
     if series:
         func, field = series
@@ -344,77 +349,77 @@ def ensure_alerts(streams, email_id, webhook_id):
               HIGH, "event_type:gui_login_failure", [auth], 5, ["src_ip", "src_zone"], ("count", None), (">=", 5)),
         alert("[IAM-02] Firewall admin login from outside Management zone",
               "Privileged login to the firewall GUI from a non-management network (ISO A.8.2 / A.8.5).",
-              MEDIUM, "event_type:gui_login_success AND NOT src_zone:Management", [auth], 5,
+              MEDIUM, "event_type:gui_login_success AND NOT src_zone:Management", [auth], 1,
               ["user", "src_ip", "src_zone"], ("count", None), (">=", 1)),
         alert("[IAM-03] Firewall admin login after hours",
               "Successful firewall GUI login between 19:00 and 07:59 Asia/Bangkok.",
-              MEDIUM, "event_type:gui_login_success AND (local_hour:>=19 OR local_hour:<8)", [auth], 5,
+              MEDIUM, "event_type:gui_login_success AND (local_hour:>=19 OR local_hour:<8)", [auth], 1,
               ["user", "src_ip", "local_hour"], ("count", None), (">=", 1)),
         alert("[IAM-04] VPN brute force",
               ">= 5 failed VPN logins for the same user within 5 minutes.",
               HIGH, "event_type:vpn_auth_failure", [vpn], 5, ["vpn_user"], ("count", None), (">=", 5)),
         alert("[CHG-01] Firewall configuration changed",
               "Every firewall config change, with who/where (ISO A.8.9 / A.8.32 change evidence).",
-              LOW, "event_type:config_change", [conf], 5,
+              LOW, "event_type:config_change", [conf], 1,
               ["user", "src_ip", "changed_via"], ("count", None), (">=", 1)),
         alert("[THR-01] IDS high-severity alert",
               "Suricata alert with priority 1 (malware, exploit, C2).",
-              HIGH, "ids_priority:1", [ids], 5,
+              HIGH, "ids_priority:1", [ids], 1,
               ["ids_signature", "src_ip", "dst_ip"], ("count", None), (">=", 1)),
         alert("[THR-02] Allowed traffic to/from threat-intel IOC",
               "Firewall PASSED a connection involving an IP on the threat-intel list.",
-              HIGH, "event_category:firewall AND fw_action:pass", [ti], 5,
+              HIGH, "event_category:firewall AND fw_action:pass", [ti], 1,
               ["src_ip", "dst_ip", "dst_port", "threat_category"], ("count", None), (">=", 1)),
         alert("[THR-03] DNS query to malicious domain",
               "Internal host resolved a domain on the threat-intel list (phishing / C2).",
-              HIGH, "event_category:dns", [ti], 5,
+              HIGH, "event_category:dns", [ti], 1,
               ["src_ip", "dns_query", "threat_category"], ("count", None), (">=", 1)),
         alert("[WEB-01] Repeated access to blocked web category",
               ">= 10 DNS queries answered from the Unbound blocklist (gambling, adult, drugs, p2p, malware) from one "
               "host within 1 hour - policy violation or infected host (ISO A.8.23).",
               MEDIUM, DNS_BLOCKED, [web], 60, ["src_ip", "src_zone"], ("count", None), (">=", 10),
-              grace_min=60),
+              grace_min=60, every_min=60),
         alert("[WEB-02] Attempt to bypass DNS filtering",
               ">= 3 blocked connections to DoT (853), outside DNS (53) or DoH resolvers from one host "
               "within 5 minutes (ISO A.8.23 / A.8.20).",
               MEDIUM, "fw_rule_tag:dns\\-bypass", [web], 5, ["src_ip", "src_zone"], ("count", None), (">=", 3),
-              grace_min=60),
+              grace_min=60, every_min=5),
         alert("[OPS-01] OPNsense log source silent",
               "No OPNsense logs for 5 minutes - logging failure or tampering (ISO A.8.15 / A.8.16).",
               HIGH, "event_source:opnsense", [DEFAULT_STREAM], 5, (), ("count", None), ("<", 1)),
         alert("[OPS-02] Log archive integrity check failed",
               "tools/log_manifest.py verify found a modified or missing archive file - possible log tampering "
               "(ISO A.8.15 / A.5.28, NFR-11).",
-              HIGH, "event_type:log_manifest_verify AND result:FAIL", [integrity], 5,
+              HIGH, "event_type:log_manifest_verify AND result:FAIL", [integrity], 1,
               ["source", "mismatch", "missing"], ("count", None), (">=", 1)),
         alert("[OPS-03] SIEM disk usage high",
               "tools/disk_check.py found the SIEM data disk above DISK_WARN_PCT (default 75%) - add disk before "
               "OpenSearch stops writing at 95% and logs are lost (ISO A.8.6 / A.8.15, Q6).",
-              MEDIUM, "event_type:disk_check AND result:WARN", [capacity], 5,
+              MEDIUM, "event_type:disk_check AND result:WARN", [capacity], 1,
               ["source", "path", "used_pct"], ("count", None), (">=", 1), grace_min=24 * 60),
         # --- switch / Wi-Fi AP (Q9; log formats simulated until the real models are known) ---
         alert("[NET-03] Unknown device on the office network",
               "A MAC address that is not in assets.csv got a DHCP lease or joined the Staff Wi-Fi in the office "
               "zone, or the switch blocked one with port security (ISO A.5.9 / A.8.20).",
               MEDIUM, "(mac_known:false AND src_zone:LAN\\-Office AND event_type:(dhcp_lease OR wifi_connected)) "
-                      "OR event_type:port_security_violation", [dhcp, wifi, switch], 5,
+                      "OR event_type:port_security_violation", [dhcp, wifi, switch], 1,
               ["src_mac", "event_type", "net_device"], ("count", None), (">=", 1), grace_min=60),
         alert("[NET-04] Switch port flapping",
               ">= 5 link-down events on the same switch port within 10 minutes - bad cable, loop or someone "
               "plugging devices in and out (ISO A.8.20).",
               LOW, "event_type:port_down", [switch], 10, ["net_device", "net_port"], ("count", None), (">=", 5),
-              grace_min=60),
+              grace_min=60, every_min=10),
         alert("[IAM-05] Switch / AP admin brute force",
               ">= 5 failed admin logins to a switch or AP from the same source within 5 minutes (ISO A.8.5).",
               HIGH, "event_type:device_login_failure", [switch, wifi], 5, ["src_ip", "src_zone", "net_device"],
               ("count", None), (">=", 5)),
         alert("[IAM-06] Switch / AP admin login from outside Management zone",
               "Successful admin login to a switch or AP from a non-management network (ISO A.8.2 / A.8.5).",
-              MEDIUM, "event_type:device_login_success AND NOT src_zone:Management", [switch, wifi], 5,
+              MEDIUM, "event_type:device_login_success AND NOT src_zone:Management", [switch, wifi], 1,
               ["user", "src_ip", "src_zone", "net_device"], ("count", None), (">=", 1)),
         alert("[CHG-02] Switch / AP configuration changed",
               "Every switch or AP config change, with who/where (ISO A.8.9 / A.8.32 change evidence).",
-              LOW, "event_type:device_config_change", [switch, wifi], 5,
+              LOW, "event_type:device_config_change", [switch, wifi], 1,
               ["user", "src_ip", "net_device"], ("count", None), (">=", 1)),
     ]
     existing = {d["title"]: d for d in api("GET", "/api/events/definitions?per_page=200")["event_definitions"]}

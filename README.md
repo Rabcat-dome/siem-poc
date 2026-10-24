@@ -6,6 +6,7 @@ POC สำหรับเตรียมตรวจ ISO/IEC 27001:2022 โด�
 - Diagram (architecture, log journey, alert perspectives, integration points): [docs/architecture.html](docs/architecture.html) เปิดใน browser
 - Tech stack: container แต่ละตัวใน Docker Desktop ทำอะไร และ production ต่างจาก POC อย่างไร: [docs/tech-stack.html](docs/tech-stack.html) เปิดใน browser
 - Network architecture และคู่มือติดตั้ง OPNsense ในออฟฟิศ (เอกสารส่งมอบ): [docs/NETWORK-ARCHITECTURE.md](docs/NETWORK-ARCHITECTURE.md)
+- บทซ้อมเกณฑ์ผ่าน POC ข้อ 5–6 (drill ตอบห้าคำถามใน 1 นาที และ walkthrough ให้ auditor ดู): [docs/WALKTHROUGH.md](docs/WALKTHROUGH.md)
 
 ```mermaid
 flowchart LR
@@ -76,7 +77,7 @@ mac_known:false AND src_zone:LAN\-Office
 event_category:(switch OR wifi)
 ```
 
-**ดู alert:** Graylog › Alerts (หรือดูที่ Mailpit/Webhook) alert ถูกประเมินทุก 1 นาที ส่วน IAM-03 (admin login นอกเวลา) จะยิงเฉพาะช่วง 19:00–07:59 เวลาไทย
+**ดู alert:** Graylog › Alerts (หรือดูที่ Mailpit/Webhook) alert ส่วนใหญ่ถูกประเมินทุก 1 นาที ยกเว้น WEB-02 ทุก 5 นาที, NET-04 ทุก 10 นาที และ WEB-01 ทุก 1 ชั่วโมง (ตรวจเป็นรอบไม่ทับกันเพื่อไม่ให้ incident เดียวขึ้นซ้ำ ดูหมายเหตุใต้ตารางใน REQUIREMENTS หัวข้อ 6) ส่วน IAM-03 (admin login นอกเวลา) จะยิงเฉพาะช่วง 19:00–07:59 เวลาไทย
 
 **ยิงทุก scenario ทันที** (ใช้ตอน demo):
 
@@ -215,7 +216,7 @@ docker compose run --rm tools /tools/disk_check.py / --warn 1 --syslog graylog:1
 
 ## ทดสอบ pipeline กับ log ตัวอย่าง
 
-[tests/run_pipeline_tests.py](tests/run_pipeline_tests.py) ส่ง log ตัวอย่างใน [tests/pipeline_cases.json](tests/pipeline_cases.json) ผ่าน pipeline simulator ของ Graylog แล้วเทียบ field ที่ได้ (ตอนนี้มี 52 เคส ครอบคลุมทุก parse rule, การ enrich, filterlog IPv6, DHCP แบบ dnsmasq, query ที่ถูก blocklist, switch, Wi-Fi AP และ disk check)
+[tests/run_pipeline_tests.py](tests/run_pipeline_tests.py) ส่ง log ตัวอย่างใน [tests/pipeline_cases.json](tests/pipeline_cases.json) ผ่าน pipeline simulator ของ Graylog แล้วเทียบ field ที่ได้ (ตอนนี้มี 53 เคส ครอบคลุมทุก parse rule, การ enrich, filterlog IPv6, DHCP แบบ dnsmasq, query ที่ถูก blocklist, switch, Wi-Fi AP และ disk check)
 
 ```bash
 python3 tests/run_pipeline_tests.py            # ทุกเคส (exit 1 ถ้ามีเคสไม่ผ่าน)
@@ -364,6 +365,8 @@ docs/                         # requirement + diagram
 docker compose run --rm provisioner
 ```
 
+การ update alert ทำให้ Graylog เริ่มรอบตรวจใหม่ alert ที่ตรวจเป็นรอบไม่ทับกันจึงไม่ได้ตรวจ log ช่วงสั้น ๆ (ไม่เกินหนึ่งรอบ) ระหว่างรอบเดิมกับรอบใหม่ ถ้าจะยิง scenario ทดสอบ ให้ยิงหลัง apply เสร็จ
+
 แก้ CSV ใน `graylog/lookup/` ไม่ต้องรันอะไร Graylog อ่านไฟล์ใหม่เองทุก 60 วินาที
 
 ## Alert ที่มีใน POC
@@ -397,6 +400,7 @@ High ส่งทั้ง Email และ Webhook ส่วน Medium/Low ส�
 
 - รหัสผ่าน `admin/admin` และ `GRAYLOG_PASSWORD_SECRET` เป็นค่าตั้งต้น ถ้าจะใช้จริงให้ตั้งใน `.env` (ดู `.env.example`) และเก็บรหัส root ไว้เป็น break-glass เหมือน `log-admin`
 - OpenSearch ปิด security plugin (ไม่ได้เปิด port ออกนอก docker network) และ UI ของ POC เป็น HTTP (production เป็น HTTPS ดูหัวข้อ "Deploy production")
+- alert ส่วนใหญ่ตรวจเป็นรอบไม่ทับกัน log ที่มาถึงหลังรอบของมันถูกตรวจไปแล้ว (นาฬิกาอุปกรณ์ช้า หรือ syslog แบบ TLS ที่ค้างส่งระหว่าง SIEM restart) จะไม่ทำให้เกิด alert จึงต้องตั้ง NTP ทุกอุปกรณ์ (NFR-02) และวัดความหน่วงใน Phase 1 (REQUIREMENTS หัวข้อ 9) ส่วน alert ระดับ High ที่นับเกณฑ์ (NET-02, IAM-01, IAM-04, IAM-05) ยังขึ้นซ้ำในหน้า Alerts ได้ ≤ 5 แถวต่อ incident (อีเมลฉบับเดียว RPT-01 รวมเป็นเหตุการณ์เดียวให้)
 - **ใช้ข้อมูลจำลองเท่านั้นตาม scope** ข้อต่อไปนี้จึงยังไม่ได้ทดสอบกับของจริงและอยู่ใน Phase 1
 - Identity (IP → ผู้ใช้) มาจาก CSV ซึ่ง sync จาก DHCP static mapping ได้ แต่ยังไม่ได้ทดสอบกับ OPNsense จริง ส่วน VPN ใช้ tunnel IP ที่ตรึงไว้ต่อ user (Client Specific Overrides) ใน `assets_static.csv`
 - filterlog IPv6 และ DHCP แบบ dnsmasq ทดสอบผ่าน simulator API เท่านั้น ยังไม่เคยเจอ traffic จริง

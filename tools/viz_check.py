@@ -21,7 +21,8 @@ and checks, over the last --hours:
 
 Scenarios fire at random, so a short window can leave widgets empty. On a
 fresh stack play every scenario first (generator --play all), wait two
-minutes, then check the last hour.
+minutes, then check the last hour. WEB-02, NET-04 and WEB-01 run every 5, 10
+and 60 minutes, so their alerts can take that long to show up.
 
 Env: GRAYLOG_URL, GRAYLOG_USER, GRAYLOG_PASSWORD, GRAYLOG_CA_FILE (HTTPS).
 Exit code 1 when anything FAILs.
@@ -71,6 +72,10 @@ MANUAL = {
     "OPS-02": "generator --play integrity_fail",
     "OPS-03": "generator --play disk_full",
     "IAM-03": "fires only 19:00-07:59 Bangkok time",
+    # not manual, but checked once per window (provision.py every_min), so a fresh play shows up late
+    "WEB-02": "checked every 5 minutes",
+    "NET-04": "checked every 10 minutes",
+    "WEB-01": "checked every hour",
 }
 
 
